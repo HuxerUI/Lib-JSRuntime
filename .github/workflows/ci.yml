@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  esbuild:
+    name: esbuild (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
+          - os: macos-15-intel
+          - os: macos-15
+          - os: windows-latest
+          - os: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S ci/esbuild-smoke -B build
+      - name: Build bundle
+        run: cmake --build build --config Release
+      - name: Verify bundle
+        run: cmake -DINPUT=build/app.js -P ci/verify-bundle.cmake
