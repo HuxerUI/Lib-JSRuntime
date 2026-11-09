@@ -1,5 +1,7 @@
 # Lib-JSRuntime — TSX for HuxerUI
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 `Lib-JSRuntime` runs TSX as a first-class HuxerUI UI language. A TSX component becomes a HuxerUI
 composition scope, every `useState` becomes a native state slot, and every host tag becomes a
 HuxerUI `View`. The DSL is still HuxerUI's: `Column`, `Text`, `Spacer`, modifiers and native events;
