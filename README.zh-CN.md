@@ -28,6 +28,9 @@ App.tsx ──内置 esbuild──▶ app.js (ES module) ──内置 QuickJS─
 | 原生宿主元素 | `Column`, `Row`, `Flow`, `Stack`, `Text`, `Button`, `TextField`, `Slider` 等 |
 | 嵌套组件 / 列表 / 条件渲染 | 函数组件、数组 children、`#fragment` |
 | 模块与宿主函数 | `SetModuleLoader()`, `RegisterFunction()`, `Context()` |
+| 结构化诊断 | `Diagnostic`, `on_diagnostic`, `LastDiagnostic()`, 组件栈 |
+| 执行预算 | `evaluation_time_limit`, `operation_time_limit`, `should_interrupt`, `stack_limit_bytes` |
+| 定时器 | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `queueMicrotask` |
 
 ## 构建依赖
 
@@ -172,16 +175,32 @@ QuickJS context 与 JS value 都是单线程的；`Runtime` 必须比它产生�
 
 `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`,
 `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`,
-`RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `IndexedPages`。
+`RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`,
+`VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages`。
 
 ## Props / Hooks / 事件
 
 - 布局：`padding`, `spacing`, `width`, `height`, `grow`, `mainAlign`, `crossAlign`,
-  `cornerRadius`, `background`, `border`, `foreground` 等
+  `cornerRadius`, `background`, `border`, `foreground`, `tooltip` 等
 - 不支持 `margin`；HuxerUI 用 padding/spacing
 - Hooks：`useState`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useEffect`,
-  `useLayoutEffect`
-- 事件：`onClick`, `onChanged`, `onSubmitted` 等，最终落到原生事件
+  `useLayoutEffect`, `useFocusRef`, `useScrollRef`
+- `useFocusRef()` 返回 `{ id, requestFocus() }`；把返回对象作为 `ref` / `focusRef` 传给一个可聚焦宿主元素，
+  即可在事件中请求原生焦点
+- `useScrollRef()` 返回 `{ id, scrollTo, scrollBy, scrollToItem, offset, metrics }`；作为 `scrollRef` 绑定到 `ScrollView`
+- `useToast()` 返回 `{ id, show(message, duration?), dismiss(layerId) }`；需要已初始化窗口
+- `useDialog()` 支持 title/message/positive/negative 和 onPositive/onNegative 回调；`showContent(() => …)` 支持自定义 TSX 内容
+- `useMenu()` 支持 `menuAnchor={menu}` + `menu.show(items)`，也支持 `showAt(x, y, items)`；item 支持 label、section、disabled、checked、onSelect
+- `useSnackBar()` 支持 `show(message, duration?)`、`showAction(message, action, onAction, duration?)`、`dismiss(layerId)`
+- `useBottomSheet()` 支持 `show(() => Child, options?)` 和 `dismiss(layerId)`
+- `usePopup()` 支持 `popupAnchor={popup}` + `popup.show(() => Child, options?)` 和 `dismiss(layerId)`
+- `TextField`：`value` + `selection` 受控，`validation` 显示校验状态，`onChange(string)` / `onEdit(TextEditingInputEvent)` / `onSubmit`
+- 事件：`onClick`、pointer down/move/up/cancel、hover、scroll、key down/up、focus/blur/context-menu/back、drag start/change/end/cancel、long press start/end/cancel、multi tap；表单控件另有 `onChange` / `onSubmit`
+- Drag / long press / multi tap 都由原生 gesture 识别，分别支持 `dragAxis`/`dragThreshold`/`dragDelay`、`longPressDuration`/`longPressMovement`、`multiTapCount`/`multiTapInterval`/`multiTapMovement`
+- 事件走 HUI 的直接路由，不是 DOM 冒泡；`onPointerIntercept`、`onScroll`、`onKeyDown/Up/Intercept` 返回 `true` 表示消费/拦截
+- 事件/定时器回调异常会以 `DiagnosticPhase::Event` / `Timer` 上报，不会展开 HUI 事件派发
+- 定时器：`setTimeout` / `setInterval` 返回数值 handle，用 `clearTimeout` / `clearInterval` 取消；回调在 UI 线程执行，runtime 销毁时自动取消
+- 定时器依赖已初始化的 HuxerUI application，应放在 effect / 事件 / timer 回调里，不建议在 bundle 顶层调用
 - `@huxerui/tsx` 的运行时和类型声明都在仓库内，不需要 npm 包
 
 ## 模块 / 宿主函数
@@ -198,10 +217,53 @@ runtime.RegisterFunction("hostCall", [](quickjs::Context&, std::span<const quick
 });
 ```
 
+## 诊断与执行预算
+
+bridge 的所有失败都会先整理成 `tsx::Diagnostic`，再交给 `on_log` / `on_error`：
+
+```cpp
+tsx::RuntimeOptions options{
+    .entry_name = "app.js",
+    .evaluation_time_limit = std::chrono::seconds(2),
+    .operation_time_limit = std::chrono::milliseconds(50),
+    .on_diagnostic = [](const tsx::Diagnostic& diagnostic) {
+      std::fprintf(stderr, "%s\n", diagnostic.description.c_str());
+    },
+    .on_error = [](std::string_view text) {
+      std::fprintf(stderr, "%s\n", std::string(text).c_str());
+    },
+};
+```
+
+`Diagnostic` 包含 `phase`、`code`、`operation`、`message`、`filename`、`line`、`column`、
+`stack`、`component_stack`、`description`。`description` 的格式为：
+
+```text
+phase [ErrorCode]: operation: message (file:line:column)
+    at Component (file:line:column)
+component stack: App > Child
+```
+
+`Runtime::LastDiagnostic()` 返回最近一次诊断，方便测试和错误面板使用。
+
+- `evaluation_time_limit`：限制一次 module load/reload 或 `Runtime::Evaluate()`。
+- `operation_time_limit`：限制一次同步组件渲染、hook 初始化、effect、事件回调、timer 回调或
+  `Runtime::Invoke()`。由 QuickJS interrupt handler 强制执行，死循环会变成
+  `ErrorCode::Interrupted`。
+- `should_interrupt`：更底层的协作式中断钩子，覆盖所有 JS 执行。
+- `memory_limit_bytes` / `stack_limit_bytes`：透传给 QuickJS。
+
+`on_diagnostic` 在 `on_log` 和 `on_error` 之前调用；诊断回调自己抛异常会被吞掉，不会覆盖原始
+JavaScript 错误。
+
 ## 限制
 
 - QuickJS 是当前唯一引擎；不再考虑替换 JS runtime
+- **TODO**：source map 回源。当前诊断位置是生成的 bundle 行号（`app.js:line:column`），不是原始 `.tsx`
 - 布局热重载会重置 state；没有 state-preserving HMR
+- 事件已覆盖 click、pointer、hover、scroll、key、focus、context menu、Back、native drag、long press、multi tap
+- `VirtualList` / `VirtualGrid` 的 `renderItem` 在虚拟测量期间运行，必须是声明式回调，不能调用 hooks；需要 hook state 时在返回的 child 里放函数组件
+- 定时器只有 `setTimeout` / `setInterval` / `queueMicrotask`；`requestAnimationFrame`、`fetch` 和通用异步 I/O 还未暴露
 - esbuild 只做转译/打包，不做 TypeScript 类型检查；`tsc` 仍是可选检查
 - Android host 没有原生 esbuild；需要外部 binary 或 Node/WASM 方案
 - 非 Linux-x64 平台需要对应内置 binary；当前已覆盖 22 个原生 host
@@ -226,6 +288,7 @@ runtime.RegisterFunction("hostCall", [](quickjs::Context&, std::span<const quick
 ## 验证
 
 - Linux 本地构建 + `ctest` 4/4 通过（tsx tests、compiled bundle、embedded QuickJS tests）
+- 测试覆盖 render/event/effect/timer 结构化诊断、组件栈、定时器、执行预算
 - `examples/counter` / `examples/preview` 构建通过
 - preview bundle 通过 headless `UiTest` 渲染、点击、重载检查
 - GitHub Actions matrix：Linux x64/arm64、macOS x64/arm64、Windows x64/arm64

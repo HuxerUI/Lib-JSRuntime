@@ -84,6 +84,86 @@ export type ColorValue = string | number | [number, number, number] | [number, n
 export type MainAlignValue = "start" | "center" | "end" | "spaceBetween" | "spaceAround" | "spaceEvenly";
 export type CrossAlignValue = "start" | "center" | "end" | "stretch";
 
+export interface InputModifiers {
+  shift: boolean;
+  control: boolean;
+  alt: boolean;
+  meta: boolean;
+}
+
+export type PointerDevice = "mouse" | "touch" | "pen";
+export type PointerPhase = "down" | "move" | "up" | "cancel";
+export type PointerButtonName = "none" | "primary" | "secondary" | "middle" | "back" | "forward";
+
+export interface PointerInputEvent {
+  type: PointerPhase;
+  pointerId: number;
+  x: number;
+  y: number;
+  device: PointerDevice;
+  button: PointerButtonName;
+  /** Bitmask of currently pressed pointer buttons. */
+  buttons: number;
+  modifiers: InputModifiers;
+}
+
+export type HoverPhase = "enter" | "move" | "leave";
+
+export interface HoverInputEvent {
+  type: HoverPhase;
+  pointerId: number;
+  x: number;
+  y: number;
+  windowX: number;
+  windowY: number;
+  device: PointerDevice;
+}
+
+export interface ScrollInputEvent {
+  x: number;
+  y: number;
+  deltaX: number;
+  deltaY: number;
+  modifiers: InputModifiers;
+}
+
+export type KeyPhase = "down" | "up";
+
+export interface KeyInputEvent {
+  type: KeyPhase;
+  key: string;
+  text: string;
+  repeat: boolean;
+  modifiers: InputModifiers;
+}
+
+export interface ContextMenuInputEvent {
+  x: number;
+  y: number;
+}
+
+export interface DragInputEvent {
+  pointerId: number;
+  device: PointerDevice;
+  origin: { x: number; y: number };
+  position: { x: number; y: number };
+  windowPosition: { x: number; y: number };
+  delta: { x: number; y: number };
+  translation: { x: number; y: number };
+  velocity: { x: number; y: number };
+}
+
+export interface LongPressInputEvent {
+  pointerId: number;
+  device: PointerDevice;
+  position: { x: number; y: number };
+  windowPosition: { x: number; y: number };
+}
+
+export interface MultiTapInputEvent extends LongPressInputEvent {
+  count: number;
+}
+
 export interface CommonProps {
   key?: Key;
   children?: Child;
@@ -104,7 +184,52 @@ export interface CommonProps {
   crossAlign?: CrossAlignValue;
   align?: "start" | "center" | "end" | "stretch" | AlignSpec;
   grow?: boolean | number;
+  tooltip?: string;
   onClick?: () => void;
+  onPointer?: (event: PointerInputEvent) => void;
+  onPointerDown?: (event: PointerInputEvent) => void;
+  onPointerMove?: (event: PointerInputEvent) => void;
+  onPointerUp?: (event: PointerInputEvent) => void;
+  onPointerCancel?: (event: PointerInputEvent) => void;
+  onPointerIntercept?: (event: PointerInputEvent) => boolean;
+  onHover?: (event: HoverInputEvent) => void;
+  onPointerEnter?: (event: HoverInputEvent) => void;
+  onPointerLeave?: (event: HoverInputEvent) => void;
+  onScroll?: (event: ScrollInputEvent) => boolean;
+  onKeyDown?: (event: KeyInputEvent) => boolean;
+  onKeyUp?: (event: KeyInputEvent) => boolean;
+  onKeyIntercept?: (event: KeyInputEvent) => boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onFocusChanged?: (focused: boolean) => void;
+  onContextMenu?: (event: ContextMenuInputEvent) => void;
+  onBack?: () => void;
+  onDragStart?: (event: DragInputEvent) => void;
+  onDrag?: (event: DragInputEvent) => void;
+  onDragEnd?: (event: DragInputEvent) => void;
+  onDragCancel?: (event: DragInputEvent) => void;
+  dragAxis?: "horizontal" | "vertical";
+  /** Minimum movement in logical pixels before drag recognition. */
+  dragThreshold?: number;
+  /** Press duration in seconds before delayed drag recognition. */
+  dragDelay?: number;
+  onLongPressStart?: (event: LongPressInputEvent) => void;
+  onLongPressEnd?: (event: LongPressInputEvent) => void;
+  onLongPressCancel?: (event: LongPressInputEvent) => void;
+  longPressDuration?: number;
+  longPressMovement?: number;
+  onMultiTap?: (event: MultiTapInputEvent) => void;
+  multiTapCount?: number;
+  multiTapInterval?: number;
+  multiTapMovement?: number;
+  /** Anchors a usePopup() to this host element. */
+  popupAnchor?: PopupRef;
+  /** Anchors a useMenu() to this host element. */
+  menuAnchor?: MenuRef;
+  /** Native focus target; bind to one focusable host element. */
+  ref?: FocusRef;
+  /** Alias for `ref`. */
+  focusRef?: FocusRef;
 }
 
 export interface LayoutProps extends CommonProps {}
@@ -140,12 +265,59 @@ export interface DividerProps extends CommonProps {
   axis?: "horizontal" | "vertical";
 }
 
+export type ScrollAlignment = "start" | "center" | "end";
+
+export interface ScrollMetrics {
+  offset: number;
+  maxOffset: number;
+  viewportExtent: number;
+  contentExtent: number;
+  connected: boolean;
+}
+
+export interface ScrollRef {
+  readonly id: number;
+  scrollTo(offset: number): boolean;
+  scrollBy(delta: number): boolean;
+  scrollToItem(index: number, alignment?: ScrollAlignment): boolean;
+  offset(): number;
+  metrics(): ScrollMetrics | undefined;
+}
+
 export interface ScrollViewProps extends CommonProps {
   axis?: "horizontal" | "vertical";
+  /** Native scroll controller; bind to one ScrollView. */
+  scrollRef?: ScrollRef;
+}
+
+export interface TextSelectionSpec {
+  /** Fixed endpoint in UTF-16 code units. */
+  anchor?: number;
+  /** Moving endpoint / caret in UTF-16 code units. */
+  active?: number;
+  affinity?: "upstream" | "downstream";
+}
+
+export interface TextRangeSpec {
+  start: number;
+  end: number;
+}
+
+export interface TextEditingInputEvent {
+  text: string;
+  selection: Required<TextSelectionSpec>;
+  composition: TextRangeSpec | null;
+}
+
+export interface ValidationSpec {
+  status: "none" | "valid" | "invalid" | "pending";
+  message?: string;
 }
 
 export interface TextFieldProps extends CommonProps {
   value?: string;
+  selection?: TextSelectionSpec;
+  validation?: ValidationSpec;
   label?: string;
   placeholder?: string;
   variant?: "filled" | "outlined" | "standard";
@@ -153,6 +325,7 @@ export interface TextFieldProps extends CommonProps {
   maxLength?: number;
   secure?: boolean;
   onChange?: (value: string) => void;
+  onEdit?: (event: TextEditingInputEvent) => void;
   onSubmit?: () => void;
 }
 
@@ -185,6 +358,63 @@ export interface IndexedPagesProps extends CommonProps {
   selected?: number;
 }
 
+export interface VirtualListProps<T = unknown> extends CommonProps {
+  items: readonly T[];
+  renderItem: (item: T, index: number) => Child;
+  axis?: "horizontal" | "vertical";
+  itemExtent?: number;
+  estimatedItemExtent?: number;
+  cacheExtent?: number;
+  scrollRef?: ScrollRef;
+}
+
+export interface VirtualGridProps<T = unknown> extends CommonProps {
+  items: readonly T[];
+  renderItem: (item: T, index: number) => Child;
+  /** Fixed column count; ignored when adaptiveColumnWidth is positive. */
+  columns?: number;
+  adaptiveColumnWidth?: number;
+  rowExtent?: number;
+  estimatedRowExtent?: number;
+  rowSpacing?: number;
+  columnSpacing?: number;
+  cacheExtent?: number;
+  itemSpans?: readonly number[];
+  scrollRef?: ScrollRef;
+}
+
+export interface TabsProps extends CommonProps {
+  labels: string[];
+  selected?: number;
+  onChange?: (index: number) => void;
+}
+
+export interface NavigationBarItem {
+  label: string;
+  src: string;
+  selectedSrc?: string;
+  disabled?: boolean;
+}
+
+export interface NavigationBarProps extends CommonProps {
+  items: NavigationBarItem[];
+  selected?: number;
+  onChange?: (index: number) => void;
+}
+
+export interface NavigationPaneProps extends CommonProps {
+  labels: string[];
+  selected?: number;
+  expanded?: boolean;
+  onChange?: (index: number) => void;
+}
+
+export interface SegmentedButtonProps extends CommonProps {
+  labels: string[];
+  selected?: number;
+  onChange?: (index: number) => void;
+}
+
 export interface ThemeProps extends CommonProps {}
 
 export const Fragment: Component<{ children?: Child }>;
@@ -211,6 +441,12 @@ export const TextField: HostComponent<TextFieldProps>;
 export const Chip: HostComponent<ChipProps>;
 export const IndexedPages: HostComponent<IndexedPagesProps>;
 export const SelectionArea: HostComponent<CommonProps>;
+export const VirtualList: <T>(props: VirtualListProps<T>) => VNode;
+export const VirtualGrid: <T>(props: VirtualGridProps<T>) => VNode;
+export const Tabs: HostComponent<TabsProps>;
+export const SegmentedButton: HostComponent<SegmentedButtonProps>;
+export const NavigationPane: HostComponent<NavigationPaneProps>;
+export const NavigationBar: HostComponent<NavigationBarProps>;
 
 export function mount(root: Child | Component): void;
 
@@ -223,10 +459,101 @@ export function useReducer<State, Action>(
   init?: (value: State) => State,
 ): [State, (action: Action) => void];
 export function useRef<T>(initial: T): { current: T };
+
+export interface PopupOptions {
+  dismissOnOutsidePress?: boolean;
+  dismissOnCancel?: boolean;
+  trapFocus?: boolean;
+  retainAnchorFocus?: boolean;
+}
+
+export interface PopupRef {
+  readonly id: number;
+  show(render: () => Child, options?: PopupOptions): number;
+  dismiss(layerId: number): boolean;
+}
+export function usePopup(): PopupRef;
+
+export interface BottomSheetOptions {
+  dismissOnOutsidePress?: boolean;
+  dismissOnCancel?: boolean;
+}
+
+export interface BottomSheetRef {
+  readonly id: number;
+  show(render: () => Child, options?: BottomSheetOptions): number;
+  dismiss(layerId: number): boolean;
+}
+export function useBottomSheet(): BottomSheetRef;
+
+export interface SnackBarRef {
+  readonly id: number;
+  show(message: string, duration?: number): number;
+  showAction(message: string, action: string, onAction: () => void, duration?: number): number;
+  dismiss(layerId: number): boolean;
+}
+export function useSnackBar(): SnackBarRef;
+
+export interface MenuItemSpec {
+  label?: string;
+  section?: boolean;
+  disabled?: boolean;
+  checked?: boolean;
+  onSelect?: () => void;
+}
+
+export interface MenuRef {
+  readonly id: number;
+  show(items: readonly MenuItemSpec[]): number;
+  showAt(x: number, y: number, items: readonly MenuItemSpec[]): number;
+  dismiss(layerId: number): boolean;
+}
+export function useMenu(): MenuRef;
+
+export interface DialogOptions {
+  title?: string;
+  message?: string;
+  positive?: string;
+  negative?: string;
+  dismissOnOutsidePress?: boolean;
+  dismissOnCancel?: boolean;
+  onPositive?: () => void;
+  onNegative?: () => void;
+}
+
+export interface DialogRef {
+  readonly id: number;
+  show(options?: DialogOptions): number;
+  showContent(render: () => Child, options?: Pick<DialogOptions, "dismissOnOutsidePress" | "dismissOnCancel">): number;
+  dismiss(layerId: number): boolean;
+}
+export function useDialog(): DialogRef;
+
+export interface ToastRef {
+  readonly id: number;
+  show(message: string, duration?: number): number;
+  dismiss(layerId: number): boolean;
+}
+export function useToast(): ToastRef;
+
+export interface FocusRef {
+  readonly id: number;
+  requestFocus(): boolean;
+}
+export function useFocusRef(): FocusRef;
+export function useScrollRef(initialOffset?: number): ScrollRef;
 export function useMemo<T>(factory: () => T, deps?: readonly unknown[]): T;
 export function useCallback<T extends (...args: never[]) => unknown>(callback: T, deps?: readonly unknown[]): T;
 export function useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;
 export function useLayoutEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;
+
+/** Opaque timer identifier returned by `setTimeout` and `setInterval`. */
+export type TimerHandle = number;
+export function setTimeout(callback: () => void, delay?: number): TimerHandle;
+export function clearTimeout(handle: TimerHandle): void;
+export function setInterval(callback: () => void, delay?: number): TimerHandle;
+export function clearInterval(handle: TimerHandle): void;
+export function queueMicrotask(callback: () => void): void;
 
 /** Classic JSX factory for `"jsx": "react"` + `"jsxFactory": "h"`. */
 export function h(type: unknown, props?: Record<string, unknown> | null, ...children: Child[]): VNode;

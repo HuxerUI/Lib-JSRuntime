@@ -12,10 +12,12 @@
 ///
 /// The runtime is single-threaded and must outlive every View it produces.
 
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -37,6 +39,37 @@ enum class LogLevel {
   Error,
 };
 
+/// Identifies the runtime phase that produced a diagnostic.
+enum class DiagnosticPhase {
+  Load,       ///< Initial bundle evaluation or bundle I/O.
+  Reload,     ///< Hot-reload evaluation or bundle I/O.
+  Render,     ///< Function-component render or a host-element builder.
+  Effect,     ///< `useEffect` setup, cleanup, or dependency handling.
+  Event,      ///< Event handler invoked from a host view.
+  Evaluation, ///< `Runtime::Evaluate()` or `Runtime::Invoke()`.
+  Timer,      ///< Timer scheduling or callback.
+  Unknown,    ///< A failure that cannot be attributed to one phase.
+};
+
+/// One structured, fully formatted runtime failure.
+///
+/// `description` is the same text passed to `RuntimeOptions::on_error` and
+/// `RuntimeOptions::on_log`. `message`, `stack`, `filename`, `line`, and
+/// `column` preserve the JavaScript details for tooling. `component_stack`
+/// lists the active TSX component path, outermost first.
+struct Diagnostic {
+  DiagnosticPhase phase = DiagnosticPhase::Unknown;
+  quickjs::ErrorCode code = quickjs::ErrorCode::Exception;
+  std::string operation;
+  std::string message;
+  std::string filename;
+  int line = 0;
+  int column = 0;
+  std::string stack;
+  std::string component_stack;
+  std::string description;
+};
+
 /// Configures one TSX runtime.
 struct RuntimeOptions {
   /// Module identity assigned to the evaluated bundle, used in diagnostics.
@@ -49,10 +82,25 @@ struct RuntimeOptions {
   std::filesystem::path module_root;
   /// QuickJS heap limit in bytes; zero keeps the engine default.
   std::size_t memory_limit_bytes = 0;
+  /// QuickJS native stack limit in bytes; zero keeps the engine default.
+  std::size_t stack_limit_bytes = 0;
+  /// Wall-clock budget for one module or Runtime::Evaluate() operation; zero
+  /// disables the limit. A runtime interrupt reports ErrorCode::Interrupted.
+  std::chrono::milliseconds evaluation_time_limit{0};
+  /// Wall-clock budget for one component render, hook initializer, effect,
+  /// event handler, or timer callback; zero disables the limit. Applies to
+  /// synchronous JavaScript calls made by the bridge.
+  std::chrono::milliseconds operation_time_limit{0};
+  /// Cooperative interrupt probe for all JavaScript execution. Return true to
+  /// abort with ErrorCode::Interrupted. The callback must be thread-safe and
+  /// must not throw.
+  std::function<bool()> should_interrupt;
+  /// Receives structured failures before `on_log`/`on_error`.
+  std::function<void(const Diagnostic&)> on_diagnostic;
   /// Receives `console` output and host diagnostics.
   std::function<void(LogLevel, std::string_view)> on_log;
-  /// Receives render, hook, event, and module failures. Rendering continues
-  /// with an inline error Text when a component throws.
+  /// Receives the formatted form of every diagnostic. Rendering continues with
+  /// an inline error Text when a component throws.
   std::function<void(std::string_view)> on_error;
 };
 
@@ -105,6 +153,11 @@ public:
   /// @return The JavaScript context owned by this runtime.
   [[nodiscard]] quickjs::Context& Context() noexcept;
   [[nodiscard]] const quickjs::Context& Context() const noexcept;
+
+  /// @return The most recently reported failure, or `std::nullopt` when no
+  ///         diagnostic has been emitted. Diagnostics are retained until the
+  ///         runtime is destroyed.
+  [[nodiscard]] std::optional<Diagnostic> LastDiagnostic() const;
 
   /// Installs a host function on the global object. It remains available to
   /// the bundle under the same name.

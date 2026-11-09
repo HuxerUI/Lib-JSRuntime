@@ -1,6 +1,7 @@
 #pragma once
 
 #include <huxerui/color.h>
+#include <huxerui/gesture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/quickjs.h>
 #include <huxerui/view.h>
@@ -26,9 +27,36 @@ namespace huxerui::tsx::detail {
 [[nodiscard]] std::optional<EdgeInsets> ToEdgeInsets(const quickjs::Value& value);
 [[nodiscard]] std::optional<CornerRadii> ToCornerRadii(const quickjs::Value& value);
 
-/// Applies modifiers shared by every host element and the generic `onClick`
-/// handler. Element-specific props are applied by the element itself first.
+/// Applies modifiers shared by every host element. Element-specific props are
+/// applied by the element itself first.
 [[nodiscard]] View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& props);
+
+/// Applies pointer, hover, scroll, keyboard, focus, context-menu, back, and
+/// click handlers shared by every host element.
+[[nodiscard]] View ApplyEventProps(RuntimeImpl& runtime, View view, const quickjs::Value& props);
+
+/// Builds portable JavaScript event objects for the host-event bridge.
+[[nodiscard]] quickjs::Value MakePointerEvent(quickjs::Context& context, const PointerEvent& event);
+[[nodiscard]] quickjs::Value MakeHoverEvent(quickjs::Context& context, const HoverEvent& event);
+[[nodiscard]] quickjs::Value MakeScrollEvent(quickjs::Context& context, const ScrollInputEvent& event);
+[[nodiscard]] quickjs::Value MakeKeyEvent(quickjs::Context& context, const KeyEvent& event);
+[[nodiscard]] quickjs::Value MakeContextMenuEvent(quickjs::Context& context, Point position);
+[[nodiscard]] quickjs::Value MakeTextEditingEvent(
+    quickjs::Context& context,
+    const TextEditingValue& value
+);
+[[nodiscard]] quickjs::Value MakeDragEvent(
+    quickjs::Context& context,
+    const DragEvent& event
+);
+[[nodiscard]] quickjs::Value MakeLongPressEvent(
+    quickjs::Context& context,
+    const LongPressEvent& event
+);
+[[nodiscard]] quickjs::Value MakeMultiTapEvent(
+    quickjs::Context& context,
+    const MultiTapEvent& event
+);
 
 void ApplyKey(View& view, const quickjs::Value& node);
 

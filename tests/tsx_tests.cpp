@@ -1,10 +1,13 @@
 #include <huxerui/testing/ui_test.h>
 #include <huxerui/tsx.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 using namespace huxerui;
@@ -309,6 +312,1142 @@ void ConditionalChildren() {
   });
 }
 
+void TooltipProp() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text } from "@huxerui/tsx";
+
+    function App() {
+      return h(Column, {
+        key: "tooltip-anchor",
+        frame: { width: 200, height: 100 },
+        background: "#ffffff",
+        tooltip: "More information",
+      }, h(Text, null, "Hover me"));
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "tooltip bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.SendPointer(PointerEvent{
+      .type = PointerEventType::Move,
+      .pointer_id = 17,
+      .position = {20.0F, 20.0F},
+      .device_kind = PointerDeviceKind::Mouse,
+  });
+  ui.PumpUntil([&] {
+    return ui.Find(testing::UiSelector::Text("More information")).Exists();
+  }, {.timeout = std::chrono::seconds(2)});
+  Check(ui.Find(testing::UiSelector::Text("More information")).Exists(),
+        "tooltip prop should present its message after hover delay");
+}
+
+void HoverInputEvent() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, useState } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("idle");
+      return h(Column, {
+        key: "hover",
+        frame: { width: 200, height: 200 },
+        background: "#ffffff",
+        onHover: (event) => setStatus("hover:" + event.type),
+        onPointerEnter: () => setStatus("enter"),
+        onPointerLeave: () => setStatus("leave"),
+      }, h(Text, null, status));
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "hover bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.SendPointer(PointerEvent{
+      .type = PointerEventType::Move,
+      .pointer_id = 13,
+      .position = {20.0F, 20.0F},
+      .device_kind = PointerDeviceKind::Mouse,
+  });
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("enter")).Exists(),
+        "mouse movement should enter a hover target");
+}
+
+void LongPressGestureEvent() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, useState } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("idle");
+      return h(Column, {
+        key: "long",
+        frame: { width: 200, height: 200 },
+        background: "#ffffff",
+        longPressDuration: 0.1,
+        onLongPressStart: () => setStatus("long-start"),
+        onLongPressEnd: () => setStatus("long-end"),
+        onLongPressCancel: () => setStatus("long-cancel"),
+      }, h(Text, null, status));
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "long press bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.SendPointer(PointerEvent{
+      .type = PointerEventType::Down,
+      .pointer_id = 11,
+      .position = {20.0F, 20.0F},
+      .device_kind = PointerDeviceKind::Mouse,
+      .changed_button = PointerButton::Primary,
+      .pressed_buttons = PointerButton::Primary,
+  });
+  ui.Pump(std::chrono::milliseconds(250));
+  ui.SendPointer(PointerEvent{
+      .type = PointerEventType::Up,
+      .pointer_id = 11,
+      .position = {20.0F, 20.0F},
+      .device_kind = PointerDeviceKind::Mouse,
+      .changed_button = PointerButton::Primary,
+      .pressed_buttons = PointerButton::None,
+  });
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("long-end")).Exists(),
+        "long press should emit started and ended");
+}
+
+void MultiTapGestureEvent() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, useState } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("idle");
+      return h(Column, {
+        key: "multi",
+        frame: { width: 200, height: 200 },
+        background: "#ffffff",
+        multiTapCount: 2,
+        onMultiTap: (event) => setStatus("multi:" + event.count),
+      }, h(Text, null, status));
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "multi tap bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.TapAt({20.0F, 20.0F});
+  ui.TapAt({20.0F, 20.0F});
+  Check(ui.Find(testing::UiSelector::Text("multi:2")).Exists(),
+        "multi tap gesture should report the configured tap count");
+}
+
+void DragGestureEvents() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, useState } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("idle");
+      return h(Column, {
+        key: "drag",
+        frame: { width: 200, height: 200 },
+        background: "#ffffff",
+        dragThreshold: 2,
+        onDragStart: () => setStatus("start"),
+        onDrag: () => setStatus("drag"),
+        onDragEnd: () => setStatus("end"),
+        onDragCancel: () => setStatus("cancel"),
+      }, h(Text, null, status));
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "drag bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.Drag({20.0F, 20.0F}, {120.0F, 20.0F}, {
+      .duration = std::chrono::milliseconds(100),
+      .segments = 4,
+  });
+  Check(ui.Find(testing::UiSelector::Text("end")).Exists(),
+        "native drag gesture should emit started/changed/ended");
+}
+
+void VirtualListElement() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, VirtualList, Text,
+    } from "@huxerui/tsx";
+
+    const items = Array.from({ length: 100 }, (_, index) => "row " + index);
+
+    function App() {
+      return h(Column, { frame: { width: 200, height: 200 } },
+        h(VirtualList, {
+          items,
+          itemExtent: 40,
+          renderItem: (item, index) => h(Text, { key: index }, item),
+        })
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "virtual list bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  Check(ui.Find(testing::UiSelector::Text("row 0")).Exists(),
+        "VirtualList should materialize the first item");
+}
+
+void PopupPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Button, Text, usePopup,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const popup = usePopup();
+      return h(Button, {
+        key: "popup",
+        popupAnchor: popup,
+        onClick: () => popup.show(() => h(Text, null, "Popup content")),
+      }, "Open popup");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "popup bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("popup")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("Popup content")).Exists(),
+        "Popup should render anchored TSX content");
+}
+
+void BottomSheetPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Button, Text, useBottomSheet,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const sheet = useBottomSheet();
+      return h(Button, {
+        key: "bottom-sheet",
+        onClick: () => sheet.show(() => h(Text, null, "Sheet content")),
+      }, "Open sheet");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "bottom sheet bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("bottom-sheet")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("Sheet content")).Exists(),
+        "BottomSheet should render custom TSX content");
+}
+
+void SnackBarPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, Text, useState, useSnackBar,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const snackBar = useSnackBar();
+      const [status, setStatus] = useState("idle");
+      return h(Column, null,
+        h(Button, {
+          key: "snackbar",
+          onClick: () => snackBar.showAction(
+            "Deleted",
+            "Undo",
+            () => setStatus("undo"),
+            2
+          ),
+        }, "Show snackbar"),
+        h(Text, { key: "snackbar-status" }, status)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "snackbar bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("snackbar")).Tap();
+  ui.Pump();
+  Check(!runtime.LastDiagnostic().has_value(), "snackbar showAction should not report an error");
+}
+
+void AnchoredMenuPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, Text, useState, useMenu,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const menu = useMenu();
+      const [status, setStatus] = useState("idle");
+      return h(Column, null,
+        h(Button, {
+          key: "menu-anchor",
+          menuAnchor: menu,
+          onClick: () => {
+            const layer = menu.show([
+              { label: "Rename", onSelect: () => setStatus("rename") },
+            ]);
+            if (layer > 0) {
+              setStatus("opened");
+            }
+          },
+        }, "Open anchored menu"),
+        h(Text, { key: "anchored-status" }, status)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "anchored menu bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("menu-anchor")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("opened")).Exists(),
+        "anchored MenuRef.show should return a live layer id");
+}
+
+void MenuPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, Text, useState, useMenu,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const menu = useMenu();
+      const [status, setStatus] = useState("idle");
+      return h(Column, null,
+        h(Button, {
+          key: "menu",
+          onClick: () => {
+            const layer = menu.showAt(20, 20, [
+              { label: "Rename", onSelect: () => setStatus("rename") },
+              { section: true },
+              { label: "Delete", disabled: true },
+            ]);
+            if (layer > 0) {
+              setStatus("opened");
+            }
+          },
+        }, "Open menu"),
+        h(Text, { key: "menu-status" }, status)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "menu bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("menu")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("opened")).Exists(),
+        "Menu showAt should return a live layer id");
+}
+
+void CustomDialogContent() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Button, Text, useDialog,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const dialog = useDialog();
+      return h(Button, {
+        key: "custom-dialog",
+        onClick: () => dialog.showContent(() => h(Text, null, "Custom dialog")),
+      }, "Open custom dialog");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "custom dialog bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("custom-dialog")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("Custom dialog")).Exists(),
+        "Dialog showContent should render its TSX content");
+}
+
+void DialogPresentation() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, Text, useState, useDialog,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const dialog = useDialog();
+      const [status, setStatus] = useState("idle");
+      return h(Column, null,
+        h(Button, {
+          key: "dialog",
+          onClick: () => dialog.show({
+            title: "Delete?",
+            message: "This cannot be undone.",
+            positive: "Delete",
+            negative: "Cancel",
+            onPositive: () => setStatus("positive"),
+            onNegative: () => setStatus("negative"),
+          }),
+        }, "Open dialog"),
+        h(Text, { key: "dialog-status" }, status)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "dialog bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("dialog")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("Delete?")).Exists(),
+        "Dialog should present its title");
+  ui.Find(testing::UiSelector::Text("Delete")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("positive")).Exists(),
+        "Dialog positive action should invoke its JS callback");
+}
+
+void ToastPresentation() {
+  const char* bundle = R"JS(
+    import { mount, h, Button, useToast } from "@huxerui/tsx";
+
+    function App() {
+      const toast = useToast();
+      return h(Button, {
+        key: "toast",
+        onClick: () => toast.show("saved", 1),
+      }, "Show toast");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "toast bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("toast")).Tap();
+  ui.Pump();
+  Check(!runtime.LastDiagnostic().has_value(), "toast show should not report an error");
+}
+
+void VirtualGridElement() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, VirtualGrid, Text,
+    } from "@huxerui/tsx";
+
+    const items = Array.from({ length: 100 }, (_, index) => "tile " + index);
+
+    function App() {
+      return h(Column, { frame: { width: 300, height: 300 } },
+        h(VirtualGrid, {
+          items,
+          columns: 2,
+          rowExtent: 50,
+          rowSpacing: 4,
+          columnSpacing: 4,
+          renderItem: (item, index) => h(Text, { key: index }, item),
+        })
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "virtual grid bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  Check(ui.Find(testing::UiSelector::Text("tile 0")).Exists(),
+        "VirtualGrid should materialize the first tile");
+}
+
+void WriteNavigationIcon() {
+  static const unsigned char kPng[] = {
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x04, 0x00, 0x00, 0x00, 0xB5, 0x1C, 0x0C, 0x02,
+      0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54,
+      0x78, 0xDA, 0x63, 0x64, 0xF8, 0x0F, 0x00, 0x01, 0x05,
+      0x01, 0x01, 0x27, 0x18, 0xE3, 0x66, 0x00, 0x00,
+      0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+  };
+  std::ofstream output("/tmp/huxerui-tsx-navigation-icon.png", std::ios::binary);
+  output.write(reinterpret_cast<const char*>(kPng), sizeof(kPng));
+}
+
+void NavigationBarElement() {
+  WriteNavigationIcon();
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, NavigationBar, Text, useState,
+    } from "@huxerui/tsx";
+
+    const items = [
+      { label: "Home", src: "/tmp/huxerui-tsx-navigation-icon.png" },
+      { label: "Settings", src: "/tmp/huxerui-tsx-navigation-icon.png" },
+    ];
+
+    function App() {
+      const [selected, setSelected] = useState(0);
+      return h(Column, null,
+        h(NavigationBar, {
+          items,
+          selected,
+          onChange: setSelected,
+        }),
+        h(Text, { key: "navigation-bar" }, "selected:" + selected)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "navigation bar bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Text("Settings")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("selected:1")).Exists(),
+        "NavigationBar should report controlled selection changes");
+}
+
+void NavigationPaneElement() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, NavigationPane, Text, useState,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const [selected, setSelected] = useState(0);
+      return h(Column, null,
+        h(NavigationPane, {
+          labels: ["Home", "Settings"],
+          expanded: true,
+          selected,
+          onChange: setSelected,
+        }),
+        h(Text, { key: "navigation" }, "selected:" + selected)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "navigation pane bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Text("Settings")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("selected:1")).Exists(),
+        "NavigationPane should report controlled selection changes");
+}
+
+void TabsAndSegmentedButton() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Tabs, SegmentedButton, Text, useState,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const [tab, setTab] = useState(0);
+      const [segment, setSegment] = useState(0);
+      return h(Column, null,
+        h(Tabs, {
+          labels: ["One", "Two"],
+          selected: tab,
+          onChange: setTab,
+        }),
+        h(SegmentedButton, {
+          labels: ["Day", "Week"],
+          selected: segment,
+          onChange: setSegment,
+        }),
+        h(Text, { key: "selection" }, "tab:" + tab + " seg:" + segment)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "tabs bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.Find(testing::UiSelector::Text("Two")).Tap();
+  ui.Pump();
+  ui.Find(testing::UiSelector::Text("Week")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("tab:1 seg:1")).Exists(),
+        "Tabs and SegmentedButton should report controlled index changes");
+}
+
+void TextFieldEditEvent() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, TextField, Text, useState, useFocusRef,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const field = useFocusRef();
+      const [value, setValue] = useState("ab");
+      const [edit, setEdit] = useState("none");
+      return h(Column, null,
+        h(Button, {
+          key: "focus-field",
+          onClick: () => field.requestFocus(),
+        }, "Focus"),
+        h(TextField, {
+          key: "field",
+          ref: field,
+          value,
+          selection: { anchor: 2, active: 2 },
+          onChange: setValue,
+          onEdit: (event) => setEdit("edit:" + event.text),
+        }),
+        h(Text, { key: "edit-status" }, edit)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "TextField edit bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.Find(testing::UiSelector::Key("focus-field")).Tap();
+  ui.Pump();
+  const auto session = ui.ActiveTextInput();
+  Check(session.has_value(), "focused TextField should expose an active input session");
+
+  TextInputCommand commit;
+  commit.kind = TextInputCommandKind::CommitText;
+  commit.text = "x";
+  const TextInputCommandBatch batch{session->session_id, {commit}};
+  const auto applied = ui.SendTextInput(batch);
+  Check(applied.result_code == TextInputResultCode::Ok, "text input commit should be accepted");
+  ui.Pump();
+
+  Check(ui.Find(testing::UiSelector::Key("field")).One().value == std::optional<std::string>("abx"),
+        "TextField onChange should write the new complete value");
+  Check(ui.Find(testing::UiSelector::Text("edit:abx")).Exists(),
+        "TextField onEdit should expose the complete edited text");
+}
+
+void ScrollRef() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, ScrollView, Text, Button, useState, useScrollRef,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const scroll = useScrollRef();
+      const [status, setStatus] = useState("idle");
+      return h(Column, null,
+        h(Button, {
+          key: "scroll-button",
+          onClick: () => {
+            const metrics = scroll.metrics();
+            setStatus(
+              scroll.scrollTo(50) &&
+              metrics !== undefined &&
+              metrics.connected &&
+              metrics.maxOffset > 0
+                ? "moved"
+                : "idle"
+            );
+          },
+        }, "Scroll"),
+        h(ScrollView, {
+          key: "scroll",
+          frame: { width: 100, height: 100 },
+          scrollRef: scroll,
+        },
+          h(Column, { frame: { width: 100, height: 500 } },
+            h(Text, null, "content")
+          )
+        ),
+        h(Text, { key: "scroll-status" }, status)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "scroll ref bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("scroll-button")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("moved")).Exists(),
+        "useScrollRef().scrollTo should move a bound ScrollView");
+}
+
+void FormProps() {
+  const char* bundle = R"JS(
+    import { mount, h, TextField } from "@huxerui/tsx";
+
+    function App() {
+      return h(TextField, {
+        key: "field",
+        value: "abc",
+        label: "Name",
+        selection: { anchor: 1, active: 2, affinity: "upstream" },
+        validation: { status: "invalid", message: "Required" },
+      });
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "form props bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  const auto field = ui.Find(testing::UiSelector::Key("field")).One();
+  Check(field.value == std::optional<std::string>("abc"),
+        "TextField value should be controlled by TSX");
+}
+
+void InputEvents() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, useState } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("idle");
+      const [key, setKey] = useState("none");
+      return h(Column, {
+        key: "surface",
+        frame: { width: 200, height: 200 },
+        padding: 10,
+        focusable: true,
+        background: "#ffffff",
+        onPointerDown: (event) => {
+          setStatus("pointer:" + event.type + ":" + event.device + ":" +
+                    event.button + ":" + event.buttons);
+        },
+        onScroll: (event) => {
+          setStatus("scroll:" + event.deltaY);
+          return true;
+        },
+        onKeyDown: (event) => {
+          setKey("key:" + event.type + ":" + event.key);
+          return true;
+        },
+      },
+        h(Text, { key: "status" }, status),
+        h(Text, { key: "key" }, key)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "input event bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.TapAt({30.0F, 30.0F}, {.device_kind = PointerDeviceKind::Mouse, .pointer_id = 7});
+  Check(ui.Find(testing::UiSelector::Text("pointer:down:mouse:primary:1")).Exists(),
+        "pointer event should expose phase, device, and button");
+
+  const auto consumed = ui.SendScroll({
+      .position = {30.0F, 30.0F},
+      .delta_y = 12.0F,
+  });
+  ui.Pump();
+  Check(consumed.y == 12.0F, "scroll handler should consume the requested delta");
+  Check(ui.Find(testing::UiSelector::Text("scroll:12")).Exists(),
+        "scroll event should expose deltas");
+
+  ui.SendKey(KeyEvent{.type = KeyEventType::Down, .key = Key::A, .text = "a"});
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("key:down:a")).Exists(),
+        "key event should reach the focused view");
+}
+
+void FocusRef() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Button, TextField, useFocusRef,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const field = useFocusRef();
+      return h(Column, null,
+        h(Button, {
+          key: "focus",
+          onClick: () => field.requestFocus(),
+        }, "Focus"),
+        h(TextField, {
+          key: "field",
+          ref: field,
+        }, "")
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "focus ref bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  ui.Find(testing::UiSelector::Key("focus")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Key("field")).One().focused,
+        "useFocusRef().requestFocus should focus the bound TextField");
+}
+
+void RenderDiagnostic() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text } from "@huxerui/tsx";
+
+    function Leaf() {
+      throw new Error("leaf boom");
+    }
+
+    function App() {
+      return h(Column, null,
+        h(Text, null, "before"),
+        h(Leaf)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  std::optional<tsx::Diagnostic> observed;
+  std::string formatted;
+  tsx::RuntimeOptions options;
+  options.bundle = bundle;
+  options.on_diagnostic = [&](const tsx::Diagnostic& value) { observed = value; };
+  options.on_error = [&](std::string_view value) { formatted = std::string(value); };
+  tsx::Runtime runtime(std::move(options));
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "render diagnostic bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "render failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Render, "render failure phase should be render");
+  Check(diagnostic->code == quickjs::ErrorCode::Exception, "render failure should be a JS exception");
+  Check(diagnostic->message.find("leaf boom") != std::string::npos, "render failure should keep the message");
+  Check(diagnostic->component_stack.find("App") != std::string::npos,
+        "render diagnostic should include the outer component");
+  Check(diagnostic->component_stack.find("Leaf") != std::string::npos,
+        "render diagnostic should include the failing component");
+  Check(diagnostic->description.find("component stack:") != std::string::npos,
+        "formatted diagnostic should include the component stack");
+  Check(observed.has_value(), "on_diagnostic should receive the structured failure");
+  Check(observed->phase == tsx::DiagnosticPhase::Render,
+        "on_diagnostic should receive the right phase");
+  Check(formatted == diagnostic->description,
+        "on_error should receive the same formatted description");
+}
+
+void EventDiagnostic() {
+  const char* bundle = R"JS(
+    import { mount, h, Button } from "@huxerui/tsx";
+
+    function App() {
+      return h(Button, {
+        key: "explode",
+        onClick: () => { throw new Error("click boom"); },
+      }, "Explode");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "event diagnostic bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.Find(testing::UiSelector::Key("explode")).Tap();
+
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "event failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Event, "event failure phase should be event");
+  Check(diagnostic->message.find("click boom") != std::string::npos,
+        "event failure should keep the message");
+  Check(diagnostic->component_stack.find("App") != std::string::npos,
+        "event diagnostic should include the owning component");
+}
+
+void EffectDiagnostic() {
+  const char* bundle = R"JS(
+    import { mount, h, Text, useEffect } from "@huxerui/tsx";
+
+    function App() {
+      useEffect(() => {
+        throw new Error("effect boom");
+      }, []);
+      return h(Text, null, "effect");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "effect diagnostic bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "effect failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Effect, "effect failure phase should be effect");
+  Check(diagnostic->message.find("effect boom") != std::string::npos,
+        "effect failure should keep the message");
+  Check(diagnostic->component_stack.find("App") != std::string::npos,
+        "effect diagnostic should include the owning component");
+}
+
+void LoadDiagnostic() {
+  tsx::Runtime runtime;
+  const auto loaded = runtime.Load("const = ;", "broken.js");
+  Check(!loaded.Succeeded(), "syntax error should fail");
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "load failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Load, "load failure phase should be load");
+  Check(diagnostic->code == quickjs::ErrorCode::Syntax, "load failure should be a syntax error");
+  Check(diagnostic->filename == "broken.js", "load diagnostic should preserve the filename");
+  Check(diagnostic->line > 0, "load diagnostic should preserve the line");
+}
+
+void TimerCallbacks() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Text, useEffect, useState,
+      setTimeout, clearTimeout, setInterval, clearInterval,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const [value, setValue] = useState("before");
+      useEffect(() => {
+        const timeout = setTimeout(() => setValue("after"), 10);
+        const interval = setInterval(() => {
+          setValue((current) => current === "after" ? "tick" : current);
+        }, 20);
+        return () => {
+          clearTimeout(timeout);
+          clearInterval(interval);
+        };
+      }, []);
+      return h(Text, null, "timer: " + value);
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "timer bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  Check(ui.Find(testing::UiSelector::Text("timer: before")).Exists(),
+        "timer should start before the timeout");
+  ui.PumpUntil([&] {
+    return ui.Find(testing::UiSelector::Text("timer: tick")).Exists();
+  });
+  Check(ui.Find(testing::UiSelector::Text("timer: tick")).Exists(),
+        "timeout and interval should update state");
+}
+
+void TimerDiagnostic() {
+  const char* bundle = R"JS(
+    import { mount, h, Text, useEffect } from "@huxerui/tsx";
+
+    function App() {
+      useEffect(() => {
+        setTimeout(() => { throw new Error("timer boom"); }, 1);
+      }, []);
+      return h(Text, null, "timer");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "timer diagnostic bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+  ui.PumpUntil([&] { return runtime.LastDiagnostic().has_value(); });
+
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "timer failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Timer, "timer failure phase should be timer");
+  Check(diagnostic->message.find("timer boom") != std::string::npos,
+        "timer failure should keep the message");
+  Check(diagnostic->component_stack.find("App") != std::string::npos,
+        "timer diagnostic should include the owning component");
+}
+
+void OperationBudget() {
+  const char* bundle = R"JS(
+    import { mount, h, Text } from "@huxerui/tsx";
+
+    function App() {
+      while (true) {}
+      return h(Text, null, "never");
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::RuntimeOptions options;
+  options.bundle = bundle;
+  options.operation_time_limit = std::chrono::milliseconds(30);
+  tsx::Runtime runtime(std::move(options));
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "operation budget bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "operation budget should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Render,
+        "operation budget failure phase should be render");
+  Check(diagnostic->code == quickjs::ErrorCode::Interrupted,
+        "operation budget failure should be Interrupted");
+}
+
+void ExecutionBudget() {
+  tsx::RuntimeOptions options;
+  options.bundle = "while (true) {}";
+  options.evaluation_time_limit = std::chrono::milliseconds(30);
+  tsx::Runtime runtime(std::move(options));
+
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(!loaded.Succeeded(), "execution budget should stop an infinite module");
+  Check(loaded.Error().Code() == quickjs::ErrorCode::Interrupted,
+        "execution budget should report Interrupted");
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "execution budget should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Load, "budget failure phase should be load");
+  Check(diagnostic->code == quickjs::ErrorCode::Interrupted,
+        "budget diagnostic should preserve Interrupted");
+}
+
 } // namespace
 
 int main() {
@@ -318,6 +1457,37 @@ int main() {
   LayoutReload();
   MemoAndRefs();
   ConditionalChildren();
+  TooltipProp();
+  HoverInputEvent();
+  LongPressGestureEvent();
+  MultiTapGestureEvent();
+  VirtualListElement();
+  PopupPresentation();
+  BottomSheetPresentation();
+  SnackBarPresentation();
+  AnchoredMenuPresentation();
+  MenuPresentation();
+  CustomDialogContent();
+  DialogPresentation();
+  ToastPresentation();
+  VirtualGridElement();
+  NavigationBarElement();
+  NavigationPaneElement();
+  TabsAndSegmentedButton();
+  TextFieldEditEvent();
+  DragGestureEvents();
+  ScrollRef();
+  FormProps();
+  InputEvents();
+  FocusRef();
+  RenderDiagnostic();
+  EventDiagnostic();
+  EffectDiagnostic();
+  LoadDiagnostic();
+  TimerCallbacks();
+  TimerDiagnostic();
+  OperationBudget();
+  ExecutionBudget();
   if (const char* bundle = std::getenv("HUXERUI_TSX_TEST_BUNDLE"); bundle != nullptr && *bundle != '\0') {
     CompiledTsx(bundle);
   }

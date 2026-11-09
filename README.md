@@ -41,11 +41,14 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 | Render into a HuxerUI application | `Runtime::Root()`, `tsx::TsxRoot(Runtime&)` |
 | Function components with stable, positional state | `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback` |
 | Commit-time effects and cleanup | `useEffect`, `useLayoutEffect` backed by `huxerui::Lifecycle` |
-| Native host elements | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `IndexedPages` |
+| Native host elements | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages` |
 | Native modifiers | padding, spacing, frame/width/height, background, foreground, border, corner radius, shadow, clip, enabled, focusable, main/cross alignment, align, grow, `onClick` |
-| Event callbacks | `onClick` everywhere; `onChange` on toggles, sliders, chips, text fields; `onSubmit` on text fields |
+| Event callbacks | `onClick`; pointer down/move/up/cancel/intercept; hover enter/move/leave; scroll; key down/up/intercept; focus/blur; context menu; Back; `onChange`/`onSubmit` on form controls |
 | Host extension | `Runtime::RegisterFunction()`, `Runtime::SetModuleLoader()`, `Runtime::Evaluate()`, `Runtime::Invoke()` |
-| Diagnostics | `RuntimeOptions::on_log`, `RuntimeOptions::on_error`, inline render error `Text` |
+| Diagnostics | `RuntimeOptions::on_diagnostic`, `on_log`, `on_error`, `Runtime::LastDiagnostic()`, inline render error `Text` |
+| Execution budgets | `RuntimeOptions::evaluation_time_limit`, `operation_time_limit`, `should_interrupt`, `stack_limit_bytes` |
+| Timers | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, runtime `queueMicrotask` |
+| Presentation | `useToast()`, `useDialog()`, `useMenu()`, `useSnackBar()`, `useBottomSheet()`, `usePopup()` |
 
 The bridge is single-threaded, like QuickJS and HuxerUI composition. Create the runtime, evaluate the
 bundle, and compose views on the application thread.
@@ -273,13 +276,19 @@ for a dev preview but not for an unbounded production hot-update service.
 | `Image` | `Image` | `src` (local file), `fit`, `tint` |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | shared modifiers |
-| `ScrollView` | `ScrollView` | `axis`; multiple children become a `Column` |
+| `ScrollView` | `ScrollView` | `axis`, `scrollRef`; multiple children become a `Column` |
 | `SelectionArea` | `SelectionArea` | one child or a `Column` |
-| `TextField` | `TextField` | `value`, `label`, `placeholder`, `variant`, `multiline`, `maxLength`, `secure`, `onChange`, `onSubmit` |
+| `TextField` | `TextField` | `value`, `selection`, `validation`, `label`, `placeholder`, `variant`, `multiline`, `maxLength`, `secure`, `onChange`, `onEdit`, `onSubmit`, `ref` |
 | `Checkbox`, `RadioButton`, `Switch` | same control | `label`, `checked`/`selected`, `onChange(bool)` |
 | `Slider` | `Slider` | `value`, `min`, `max`, `step`, `onChange(number)` |
 | `ProgressBar`, `ProgressCircle` | same control | `progress`; omitted means indeterminate |
 | `Chip` | `Chip` | `label`, `selected`, `onChange(bool)` |
+| `VirtualList` | `VirtualList` | `items`, `renderItem`, `itemExtent`, `estimatedItemExtent`, `cacheExtent`, `axis`, `scrollRef` |
+| `VirtualGrid` | `VirtualGrid` | `items`, `renderItem`, `columns`/`adaptiveColumnWidth`, `rowExtent`, `estimatedRowExtent`, spacing, `itemSpans`, `scrollRef` |
+| `Tabs` | `Tabs` | `labels`, `selected`, `onChange(number)` |
+| `SegmentedButton` | `SegmentedButton` | `labels`, `selected`, `onChange(number)` |
+| `NavigationPane` | `NavigationPane` | `labels`, `selected`, `expanded`, `onChange(number)` |
+| `NavigationBar` | `NavigationBar` | `items: { label, src, selectedSrc?, disabled? }[]`, `selected`, `onChange(number)` |
 | `IndexedPages` | `IndexedPages` | `selected` page index |
 
 Text children are concatenated in order: `<Text>Count: {count}</Text>` produces `"Count: 3"`.
@@ -303,6 +312,7 @@ Shared props map one-to-one onto HuxerUI modifiers:
 | `mainAlign` / `crossAlign` | `MainAlign` / `CrossAlign` |
 | `align` | `Align` (`"center"` or `{ horizontal, vertical }`) |
 | `grow` | `Grow` (`true` or a factor) |
+| `tooltip` | `Tooltip` (string message) |
 
 Colors accept `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(...)`, `rgba(...)`, common names,
 `0xRRGGBB`, `[r, g, b, a?]`, or `{ r, g, b, a? }`. Channels are 0–255; alpha is 0–1.
@@ -319,6 +329,51 @@ const ref = useRef(initial);                  // stable object, mutations do not
 const value = useMemo(factory, deps);         // compared with Object.is
 const callback = useCallback(fn, deps);
 useEffect(() => { return () => cleanup(); }, deps);
+
+const field = useFocusRef();
+return <TextField ref={field} value={value} onChange={setValue} />;
+// field.requestFocus() requests native keyboard focus for the bound control.
+
+const scroll = useScrollRef();
+return <ScrollView scrollRef={scroll}>{content}</ScrollView>;
+// scroll.scrollTo(120), scroll.scrollBy(40), scroll.offset(), scroll.metrics()
+
+const toast = useToast();
+toast.show("Changes saved", 2);
+
+const dialog = useDialog();
+dialog.show({
+  title: "Delete?",
+  message: "This cannot be undone.",
+  positive: "Delete",
+  negative: "Cancel",
+  onPositive: removeItem,
+});
+
+dialog.showContent(() => <Text>Custom TSX dialog content</Text>);
+
+const snackBar = useSnackBar();
+snackBar.showAction("Deleted", "Undo", restoreItem, 4);
+
+const sheet = useBottomSheet();
+sheet.show(() => <Text>Bottom sheet content</Text>);
+
+const popup = usePopup();
+<Button popupAnchor={popup} onClick={() => popup.show(() => <Text>Popup</Text>)} />;
+
+const menu = useMenu();
+return (
+  <Button menuAnchor={menu} onClick={() => menu.show([
+    { label: "Rename", onSelect: renameItem },
+    { section: true },
+    { label: "Delete", disabled: true },
+  ])}>
+    Actions
+  </Button>
+);
+
+// Coordinate mode is also available:
+// menu.showAt(120, 80, [{ label: "Rename", onSelect: renameItem }]);
 ```
 
 Rules match React: call hooks unconditionally and in the same order on every render. State is
@@ -331,15 +386,42 @@ and is a bug.
 const [data, setData] = useState(() => loadInitialData());
 ```
 
-## Events
+## Events and timers
 
-- `onClick` is available on every host element and maps to `ViewEvents::Click`.
-- `onChange` maps to `ToggleEvents::Changed` (`bool`), `SliderEvents::Changed` (`number`), or
-  `TextFieldEvents::Changed` (`string`).
-- `onSubmit` maps to `TextFieldEvents::Submitted`.
+Shared event props map to HuxerUI typed events:
 
-Handlers run synchronously on the UI thread. A thrown exception is reported through
-`RuntimeOptions::on_error` and does not unwind the HuxerUI event dispatch.
+| TSX prop | HuxerUI event | JS payload / return |
+| --- | --- | --- |
+| `onClick` | `ViewEvents::Click` | no payload |
+| `onPointer`, `onPointerDown`, `onPointerMove`, `onPointerUp`, `onPointerCancel` | `ViewEvents::Pointer` | `PointerInputEvent` |
+| `onPointerIntercept` | `ViewEvents::PointerIntercept` | `PointerInputEvent`; return `true` to take ownership |
+| `onHover`, `onPointerEnter`, `onPointerLeave` | `ViewEvents::Hover` | `HoverInputEvent` |
+| `onScroll` | `ViewEvents::ScrollInput` | `ScrollInputEvent`; return `true` to consume |
+| `onKeyDown`, `onKeyUp` | `ViewEvents::KeyDown` / `KeyUp` | `KeyInputEvent`; return `true` to consume |
+| `onKeyIntercept` | `ViewEvents::KeyIntercept` | `KeyInputEvent`; return `true` to consume before the focused view |
+| `onFocus`, `onBlur`, `onFocusChanged` | `ViewEvents::FocusChanged` | optional `boolean` for `onFocusChanged` |
+| `onContextMenu` | `ViewEvents::ContextMenuRequested` | `{ x, y }` |
+| `onBack` | `ViewEvents::BackRequested` | no payload |
+| `onDragStart`, `onDrag`, `onDragEnd`, `onDragCancel` | native `DragGesture` + `DragEvents` | `DragInputEvent`; `dragAxis`, `dragThreshold`, `dragDelay` configure recognition |
+| `onLongPressStart`, `onLongPressEnd`, `onLongPressCancel` | native `LongPressGesture` + `LongPressEvents` | `LongPressInputEvent`; `longPressDuration`, `longPressMovement` configure recognition |
+| `onMultiTap` | native `MultiTapGesture` + `MultiTapEvents` | `MultiTapInputEvent`; `multiTapCount`, `multiTapInterval`, `multiTapMovement` configure recognition |
+
+`onChange` maps to `ToggleEvents::Changed` (`bool`), `SliderEvents::Changed` (`number`), or
+`TextFieldEvents::Changed` (`string`). `onSubmit` maps to `TextFieldEvents::Submitted`.
+
+Input events follow HuxerUI routing, not DOM bubbling: pointer/key/scroll are direct to the target
+or focused view, and only the handlers with a `bool` result consume or intercept. There is no
+`stopPropagation()`/`preventDefault()` object; return `true` from the relevant handler.
+
+Handlers run synchronously on the UI thread. A thrown exception is reported as a structured
+`DiagnosticPhase::Event` diagnostic and does not unwind the HuxerUI event dispatch.
+
+Timers use the application's monotonic timer through HuxerUI `TaskScope`/`Delay`; callbacks run on
+the UI thread. `setTimeout`/`setInterval` return a numeric `TimerHandle`; clear it with
+`clearTimeout`/`clearInterval`. Timers are cancelled automatically when the runtime is destroyed.
+They require an active HuxerUI application and should be scheduled from an effect, event, or timer
+callback rather than during bundle evaluation. `requestAnimationFrame` and `fetch` are not provided
+yet.
 
 ## Modules and host functions
 
@@ -367,23 +449,64 @@ runtime.RegisterFunction("readClipboard", [](quickjs::Context& context, std::spa
 Host globals are registered before bundle evaluation. Bundling is recommended so the application
 does not need a JS module graph at runtime.
 
+## Diagnostics and execution budgets
+
+Every bridge failure is normalized into `tsx::Diagnostic` before it reaches `on_log` or `on_error`:
+
+```cpp
+tsx::RuntimeOptions options{
+    .entry_name = "app.js",
+    .evaluation_time_limit = std::chrono::seconds(2),
+    .operation_time_limit = std::chrono::milliseconds(50),
+    .on_diagnostic = [](const tsx::Diagnostic& diagnostic) {
+      std::fprintf(stderr, "%s\n", diagnostic.description.c_str());
+    },
+    .on_error = [](std::string_view text) {
+      std::fprintf(stderr, "%s\n", std::string(text).c_str());
+    },
+};
+```
+
+`Diagnostic` carries `phase`, `code`, `operation`, `message`, `filename`, `line`, `column`,
+`stack`, `component_stack`, and `description`. The description is formatted as
+`phase [ErrorCode]: operation: message (file:line:column)` followed by the JavaScript stack and
+`component stack: App > Child`. `Runtime::LastDiagnostic()` returns the most recent one, which is
+useful for tests and error overlays.
+
+- `evaluation_time_limit` bounds one module load/reload or `Runtime::Evaluate()` call.
+- `operation_time_limit` bounds one synchronous component render, hook initializer, effect, event
+  handler, timer callback, or `Runtime::Invoke()` call. It is enforced by the QuickJS interrupt
+  handler, so a runaway `while (true)` becomes `ErrorCode::Interrupted`.
+- `should_interrupt` is a lower-level cooperative probe for all JavaScript execution.
+- `stack_limit_bytes` and `memory_limit_bytes` are forwarded to QuickJS.
+
+`on_diagnostic` runs before `on_log` and `on_error`; exceptions thrown by diagnostic callbacks are
+contained so they cannot mask the original JavaScript failure.
+
 ## Limits
 
-- No React compatibility layer: no context, suspense, portals, refs to native views, or concurrent
-  rendering. `useRef` stores a JavaScript value; it does not expose a host view.
+- No React compatibility layer: no context, suspense, portals, general native-view refs, or concurrent
+  rendering. `useRef` stores a JavaScript value; `useFocusRef` exposes focus for one bound focusable
+  host element, and `useScrollRef` exposes a controller for one bound `ScrollView`.
 - A component that returns several sibling elements is stacked in a `Column`; HuxerUI has no
   fragment view. Put sibling arrays directly inside a layout to keep its axis.
 - `margin` is not translated; HuxerUI uses padding and spacing.
-- Events currently cover click, toggle, slider, chip, and text-field changes. Pointer, key, focus,
-  drag, and scroll callbacks are not forwarded yet.
+- Events cover click, pointer, hover, scroll, key, focus, context menu, Back, drag, long press, and
+  multi tap, plus toggle, slider, chip, and text-field changes.
+- Timers cover `setTimeout`, `setInterval`, and `queueMicrotask`; `requestAnimationFrame`, `fetch`,
+  and general async host I/O are not exposed yet.
 - Images resolve local files through `ImageAsset::FromFile`; packaged resource IDs, network URLs,
   and vector assets are not exposed.
-- `VirtualList`/`VirtualGrid`, `Tabs`, `SegmentedButton`, navigation, menus, dialogs, animation, and
-  canvas are not bridged yet.
+- Routed navigation, animation, and canvas are not bridged yet.
+- `VirtualList::renderItem` / `VirtualGrid::renderItem` are declarative callbacks that run during
+  virtual measurement; they must not call hooks. Use a function component inside the returned child
+  for hook state.
 - The runtime owns the JavaScript context. It must outlive every `View` it produced; do not destroy
   it while the application is mounted.
 - Startup cost is one QuickJS context plus module evaluation. Keep heavy work off the UI thread and
   avoid large object graphs in state.
+- TODO: source-map back-mapping. Diagnostic locations currently point at generated bundle positions
+  (`app.js:line:column`), not the original `.tsx` file.
 
 ## Repository layout
 
@@ -414,8 +537,9 @@ the embedded `quickjs/` sources:
 - Library and example configure and build (GCC 16.2.1, Ninja).
 - `ctest` passes: embedded QuickJS engine tests, counter/updater state, nested component state
   preservation, effect run/cleanup, lazy initializers, memo/ref behavior, conditional and array
-  children, layout hot reload (new layout, fresh state, failed-reload rollback), plus an optional
-  end-to-end test that bundles the example TSX with the vendored esbuild, loads the emitted module
+  children, layout hot reload (new layout, fresh state, failed-reload rollback), structured
+  render/event/effect/timer diagnostics with component stacks, timer callbacks, execution budgets,
+  plus an optional end-to-end test that bundles the example TSX with the vendored esbuild, loads the emitted module
   through the runtime's module loader, and drives it with `huxerui::testing::UiTest`.
 - The TypeScript declarations type-check the example and a hook/form API sample with `tsc --strict`
   (`jsx: react-jsx`, `jsxImportSource: @huxerui/tsx`).

@@ -287,6 +287,11 @@ View BuildScrollView(RuntimeImpl& runtime, const quickjs::Value& props) {
   ScrollView element(content);
   const auto axis = StringProperty(props, "axis").value_or("vertical");
   element = std::move(element).ScrollAxis(AttributeName(axis) == "horizontal" ? Axis::Horizontal : Axis::Vertical);
+  if (const auto ref = Property(props, "scrollRef"); ref && ref->IsObject()) {
+    if (const auto controller = runtime.FindScrollController(*ref)) {
+      element = std::move(element).Controller(*controller);
+    }
+  }
   return element;
 }
 
@@ -299,8 +304,21 @@ View BuildSelectionArea(RuntimeImpl& runtime, const quickjs::Value& props) {
 }
 
 View BuildTextField(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   TextEditingValue value;
   value.text = StringProperty(props, "value").value_or("");
+  if (const auto selection = Property(props, "selection"); selection && selection->IsObject()) {
+    const auto anchor = NumberProperty(*selection, "anchor");
+    const auto active = NumberProperty(*selection, "active");
+    if (anchor && active) {
+      value.selection.anchor = static_cast<TextOffset>(*anchor);
+      value.selection.active = static_cast<TextOffset>(*active);
+      if (const auto affinity = StringProperty(*selection, "affinity");
+          affinity && AttributeName(*affinity) == "upstream") {
+        value.selection.affinity = TextAffinity::Upstream;
+      }
+    }
+  }
   TextField element(value);
   if (const auto label = StringProperty(props, "label")) {
     element = std::move(element).Label(*label);
@@ -327,65 +345,103 @@ View BuildTextField(RuntimeImpl& runtime, const quickjs::Value& props) {
   if (const auto secure = BoolProperty(props, "secure"); secure && *secure) {
     element = std::move(element).Secure();
   }
-  if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
+  if (const auto validation = Property(props, "validation"); validation && validation->IsObject()) {
+    const auto status = StringProperty(*validation, "status");
+    if (status) {
+      const auto name = AttributeName(*status);
+      const auto message = StringProperty(*validation, "message").value_or("");
+      if (name == "invalid") {
+        element = std::move(element).Validation(ValidationResult::Invalid(message));
+      } else if (name == "valid") {
+        element = std::move(element).Validation(ValidationResult::Valid());
+      } else if (name == "pending") {
+        element = std::move(element).Validation(ValidationResult::Pending(message));
+      } else {
+        element = std::move(element).Validation(ValidationResult::None());
+      }
+    }
+  }
+  const auto on_change = Property(props, "onChange");
+  const auto on_edit = Property(props, "onEdit");
+  if ((on_change && on_change->IsFunction()) || (on_edit && on_edit->IsFunction())) {
     element = std::move(element).OnChanged(
-        [impl = &runtime, function = *handler](const TextEditingValue& next) {
-          const auto argument = impl->Context().NewString(next.text);
-          if (argument.Succeeded()) {
-            const quickjs::Value arguments[]{argument.Value()};
-            impl->InvokeHandler(function, arguments);
+        [impl = &runtime, on_change, on_edit, component](const TextEditingValue& next) {
+          if (on_change && on_change->IsFunction()) {
+            const auto argument = impl->Context().NewString(next.text);
+            if (argument.Succeeded()) {
+              const quickjs::Value arguments[]{argument.Value()};
+              impl->InvokeHandler(*on_change, arguments, DiagnosticPhase::Event, component);
+            }
+          }
+          if (on_edit && on_edit->IsFunction()) {
+            try {
+              const auto event = MakeTextEditingEvent(impl->Context(), next);
+              const quickjs::Value arguments[]{event};
+              impl->InvokeHandler(*on_edit, arguments, DiagnosticPhase::Event, component);
+            } catch (const std::exception& error) {
+              impl->ReportMessage(
+                  DiagnosticPhase::Event,
+                  "text edit event",
+                  error.what(),
+                  component
+              );
+            }
           }
         }
     );
   }
   if (const auto handler = Property(props, "onSubmit"); handler && handler->IsFunction()) {
-    element = std::move(element).OnSubmitted([impl = &runtime, function = *handler] {
-      impl->InvokeHandler(function, {});
+    element = std::move(element).OnSubmitted([impl = &runtime, function = *handler, component] {
+      impl->InvokeHandler(function, {}, DiagnosticPhase::Event, component);
     });
   }
   return element;
 }
 
 View BuildCheckbox(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   const std::string label = StringProperty(props, "label").value_or(ChildText(props));
   const bool checked = BoolProperty(props, "checked").value_or(false);
   Checkbox element = label.empty() ? Checkbox(checked) : Checkbox(label, checked);
   if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
-    element = std::move(element).OnChanged([impl = &runtime, function = *handler](bool next) {
+    element = std::move(element).OnChanged([impl = &runtime, function = *handler, component](bool next) {
       const quickjs::Value arguments[]{impl->Context().Boolean(next)};
-      impl->InvokeHandler(function, arguments);
+      impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
     });
   }
   return element;
 }
 
 View BuildRadioButton(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   const std::string label = StringProperty(props, "label").value_or(ChildText(props));
   const bool selected = BoolProperty(props, "selected").value_or(false);
   RadioButton element = label.empty() ? RadioButton(selected) : RadioButton(label, selected);
   if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
-    element = std::move(element).OnChanged([impl = &runtime, function = *handler](bool next) {
+    element = std::move(element).OnChanged([impl = &runtime, function = *handler, component](bool next) {
       const quickjs::Value arguments[]{impl->Context().Boolean(next)};
-      impl->InvokeHandler(function, arguments);
+      impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
     });
   }
   return element;
 }
 
 View BuildSwitch(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   const std::string label = StringProperty(props, "label").value_or(ChildText(props));
   const bool checked = BoolProperty(props, "checked").value_or(false);
   Switch element = label.empty() ? Switch(checked) : Switch(label, checked);
   if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
-    element = std::move(element).OnChanged([impl = &runtime, function = *handler](bool next) {
+    element = std::move(element).OnChanged([impl = &runtime, function = *handler, component](bool next) {
       const quickjs::Value arguments[]{impl->Context().Boolean(next)};
-      impl->InvokeHandler(function, arguments);
+      impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
     });
   }
   return element;
 }
 
 View BuildSlider(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   const float value = static_cast<float>(NumberProperty(props, "value").value_or(0.0));
   Slider element(value);
   const auto minimum = NumberProperty(props, "min");
@@ -400,9 +456,9 @@ View BuildSlider(RuntimeImpl& runtime, const quickjs::Value& props) {
     element = std::move(element).Step(static_cast<float>(*step));
   }
   if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
-    element = std::move(element).OnChanged([impl = &runtime, function = *handler](float next) {
+    element = std::move(element).OnChanged([impl = &runtime, function = *handler, component](float next) {
       const quickjs::Value arguments[]{impl->Context().Number(next)};
-      impl->InvokeHandler(function, arguments);
+      impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
     });
   }
   return element;
@@ -423,14 +479,337 @@ View BuildProgressCircle(RuntimeImpl& runtime, const quickjs::Value& props) {
 }
 
 View BuildChip(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const std::string component = runtime.CurrentComponentPath();
   const std::string label = StringProperty(props, "label").value_or(ChildText(props));
   const bool selected = BoolProperty(props, "selected").value_or(false);
   Chip element(label, selected);
   if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
-    element = std::move(element).OnChanged([impl = &runtime, function = *handler](bool next) {
+    element = std::move(element).OnChanged([impl = &runtime, function = *handler, component](bool next) {
       const quickjs::Value arguments[]{impl->Context().Boolean(next)};
-      impl->InvokeHandler(function, arguments);
+      impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
     });
+  }
+  return element;
+}
+
+std::vector<StringVariant> StringListProperty(const quickjs::Value& props, std::string_view name) {
+  std::vector<StringVariant> output;
+  const auto value = Property(props, name);
+  if (!value || !value->IsArray()) {
+    return output;
+  }
+  const auto length = value->Length();
+  if (!length.Succeeded()) {
+    return output;
+  }
+  output.reserve(static_cast<std::size_t>(length.Value()));
+  for (std::int64_t index = 0; index < length.Value(); ++index) {
+    const auto element = value->GetElement(static_cast<std::uint32_t>(index));
+    if (!element.Succeeded()) {
+      continue;
+    }
+    const auto text = element.Value().ToString();
+    if (text.Succeeded()) {
+      output.emplace_back(text.Value());
+    }
+  }
+  return output;
+}
+
+View BuildVirtualList(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto items = Property(props, "items");
+  const auto render = Property(props, "renderItem");
+  if (!items || !items->IsArray()) {
+    return Text("VirtualList requires an items array");
+  }
+  if (!render || !render->IsFunction()) {
+    return Text("VirtualList requires a renderItem function");
+  }
+  const auto length = items->Length();
+  if (!length.Succeeded() || length.Value() < 0) {
+    return Text("VirtualList items length is invalid");
+  }
+
+  const auto component = runtime.CurrentComponentPath();
+  auto item_array = *items;
+  auto render_function = *render;
+  auto* impl = &runtime;
+  VirtualList element(
+      static_cast<std::size_t>(length.Value()),
+      [impl, item_array, render_function, component](std::size_t index) -> View {
+        const auto item = item_array.GetElement(static_cast<std::uint32_t>(index));
+        if (!item.Succeeded()) {
+          return Text("VirtualList could not read item " + std::to_string(index));
+        }
+        const quickjs::Value arguments[]{
+            item.Value(),
+            impl->Context().Number(static_cast<double>(index)),
+        };
+        const auto rendered = render_function.Call(arguments);
+        if (!rendered.Succeeded()) {
+          impl->ReportError(
+              DiagnosticPhase::Render,
+              "virtual item",
+              rendered.Error(),
+              component
+          );
+          return impl->ErrorView(rendered.Error().Message());
+        }
+        return impl->RenderValue(rendered.Value());
+      }
+  );
+
+  if (const auto axis = StringProperty(props, "axis"); axis) {
+    element = std::move(element).ScrollAxis(
+        AttributeName(*axis) == "horizontal" ? Axis::Horizontal : Axis::Vertical
+    );
+  }
+  if (const auto extent = NumberProperty(props, "itemExtent"); extent && *extent > 0.0) {
+    element = std::move(element).ItemExtent(static_cast<float>(*extent));
+  }
+  if (const auto extent = NumberProperty(props, "estimatedItemExtent"); extent && *extent > 0.0) {
+    element = std::move(element).EstimatedItemExtent(static_cast<float>(*extent));
+  }
+  if (const auto extent = NumberProperty(props, "cacheExtent"); extent && *extent >= 0.0) {
+    element = std::move(element).CacheExtent(static_cast<float>(*extent));
+  }
+  if (const auto ref = Property(props, "scrollRef"); ref && ref->IsObject()) {
+    if (const auto controller = runtime.FindScrollController(*ref)) {
+      element = std::move(element).Controller(*controller);
+    }
+  }
+  return element;
+}
+
+View BuildVirtualGrid(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto items = Property(props, "items");
+  const auto render = Property(props, "renderItem");
+  if (!items || !items->IsArray()) {
+    return Text("VirtualGrid requires an items array");
+  }
+  if (!render || !render->IsFunction()) {
+    return Text("VirtualGrid requires a renderItem function");
+  }
+  const auto length = items->Length();
+  if (!length.Succeeded() || length.Value() < 0) {
+    return Text("VirtualGrid items length is invalid");
+  }
+
+  const auto component = runtime.CurrentComponentPath();
+  auto item_array = *items;
+  auto render_function = *render;
+  auto* impl = &runtime;
+  VirtualGrid element(
+      static_cast<std::size_t>(length.Value()),
+      [impl, item_array, render_function, component](std::size_t index) -> View {
+        const auto item = item_array.GetElement(static_cast<std::uint32_t>(index));
+        if (!item.Succeeded()) {
+          return Text("VirtualGrid could not read item " + std::to_string(index));
+        }
+        const quickjs::Value arguments[]{
+            item.Value(),
+            impl->Context().Number(static_cast<double>(index)),
+        };
+        const auto rendered = render_function.Call(arguments);
+        if (!rendered.Succeeded()) {
+          impl->ReportError(
+              DiagnosticPhase::Render,
+              "virtual grid item",
+              rendered.Error(),
+              component
+          );
+          return impl->ErrorView(rendered.Error().Message());
+        }
+        return impl->RenderValue(rendered.Value());
+      }
+  );
+
+  if (const auto adaptive = NumberProperty(props, "adaptiveColumnWidth");
+      adaptive && *adaptive > 0.0) {
+    element = std::move(element).Columns(GridColumns::Adaptive(static_cast<float>(*adaptive)));
+  } else {
+    const auto columns = NumberProperty(props, "columns").value_or(1.0);
+    element = std::move(element).Columns(
+        GridColumns::Fixed(static_cast<std::size_t>(std::max(1.0, columns)))
+    );
+  }
+  if (const auto extent = NumberProperty(props, "rowExtent"); extent && *extent > 0.0) {
+    element = std::move(element).RowExtent(static_cast<float>(*extent));
+  }
+  if (const auto extent = NumberProperty(props, "estimatedRowExtent"); extent && *extent > 0.0) {
+    element = std::move(element).EstimatedRowExtent(static_cast<float>(*extent));
+  }
+  if (const auto spacing = NumberProperty(props, "rowSpacing"); spacing && *spacing >= 0.0) {
+    element = std::move(element).RowSpacing(static_cast<float>(*spacing));
+  }
+  if (const auto spacing = NumberProperty(props, "columnSpacing"); spacing && *spacing >= 0.0) {
+    element = std::move(element).ColumnSpacing(static_cast<float>(*spacing));
+  }
+  if (const auto extent = NumberProperty(props, "cacheExtent"); extent && *extent >= 0.0) {
+    element = std::move(element).CacheExtent(static_cast<float>(*extent));
+  }
+  if (const auto spans = Property(props, "itemSpans"); spans && spans->IsArray()) {
+    std::vector<std::size_t> values;
+    const auto span_length = spans->Length();
+    if (span_length.Succeeded()) {
+      values.reserve(static_cast<std::size_t>(span_length.Value()));
+      for (std::int64_t index = 0; index < span_length.Value(); ++index) {
+        const auto span = spans->GetElement(static_cast<std::uint32_t>(index));
+        if (!span.Succeeded()) {
+          continue;
+        }
+        const auto number = span.Value().ToNumber();
+        if (number.Succeeded() && std::isfinite(number.Value())) {
+          values.push_back(static_cast<std::size_t>(std::max(1.0, number.Value())));
+        }
+      }
+    }
+    if (!values.empty()) {
+      element = std::move(element).ItemSpans(std::move(values));
+    }
+  }
+  if (const auto ref = Property(props, "scrollRef"); ref && ref->IsObject()) {
+    if (const auto controller = runtime.FindScrollController(*ref)) {
+      element = std::move(element).Controller(*controller);
+    }
+  }
+  return element;
+}
+
+View BuildNavigationPane(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto component = runtime.CurrentComponentPath();
+  auto labels = StringListProperty(props, "labels");
+  if (labels.empty()) {
+    return Text("NavigationPane requires a non-empty labels array");
+  }
+  std::vector<NavigationItem> items;
+  items.reserve(labels.size());
+  for (auto& label : labels) {
+    items.emplace_back(std::move(label));
+  }
+  const double selected = NumberProperty(props, "selected").value_or(0.0);
+  const auto index = static_cast<std::size_t>(std::clamp(
+      selected,
+      0.0,
+      static_cast<double>(items.size() - 1)
+  ));
+  NavigationPane element(
+      std::move(items),
+      index,
+      BoolProperty(props, "expanded").value_or(false)
+  );
+  if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
+    element = std::move(element).OnChanged(
+        [impl = &runtime, function = *handler, component](std::size_t next) {
+          const quickjs::Value arguments[]{impl->Context().Number(static_cast<double>(next))};
+          impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
+        }
+    );
+  }
+  return element;
+}
+
+View BuildNavigationBar(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto component = runtime.CurrentComponentPath();
+  const auto items_value = Property(props, "items");
+  if (!items_value || !items_value->IsArray()) {
+    return Text("NavigationBar requires an items array");
+  }
+  const auto length = items_value->Length();
+  if (!length.Succeeded() || length.Value() <= 0) {
+    return Text("NavigationBar requires a non-empty items array");
+  }
+  std::vector<NavigationItem> items;
+  items.reserve(static_cast<std::size_t>(length.Value()));
+  for (std::int64_t index = 0; index < length.Value(); ++index) {
+    const auto value = items_value->GetElement(static_cast<std::uint32_t>(index));
+    if (!value.Succeeded() || !value.Value().IsObject()) {
+      continue;
+    }
+    const auto label = StringProperty(value.Value(), "label");
+    const auto source = StringProperty(value.Value(), "src");
+    if (!label || label->empty() || !source || source->empty()) {
+      continue;
+    }
+    try {
+      NavigationItem item(ImageAsset::FromFile(*source), *label);
+      if (const auto selected = StringProperty(value.Value(), "selectedSrc");
+          selected && !selected->empty()) {
+        item = std::move(item).SelectedIcon(ImageAsset::FromFile(*selected));
+      }
+      if (const auto disabled = BoolProperty(value.Value(), "disabled"); disabled && *disabled) {
+        item = std::move(item).Enabled(false);
+      }
+      items.push_back(std::move(item));
+    } catch (...) {
+      return Text("NavigationBar could not load icon: " + *source);
+    }
+  }
+  if (items.empty()) {
+    return Text("NavigationBar requires at least one valid item");
+  }
+  const double selected = NumberProperty(props, "selected").value_or(0.0);
+  const auto selected_index = static_cast<std::size_t>(std::clamp(
+      selected,
+      0.0,
+      static_cast<double>(items.size() - 1)
+  ));
+  NavigationBar element(std::move(items), selected_index);
+  if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
+    element = std::move(element).OnChanged(
+        [impl = &runtime, function = *handler, component](std::size_t next) {
+          const quickjs::Value arguments[]{impl->Context().Number(static_cast<double>(next))};
+          impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
+        }
+    );
+  }
+  return element;
+}
+
+View BuildTabs(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto component = runtime.CurrentComponentPath();
+  auto labels = StringListProperty(props, "labels");
+  if (labels.empty()) {
+    return Text("Tabs requires a non-empty labels array");
+  }
+  const double selected = NumberProperty(props, "selected").value_or(0.0);
+  const auto index = static_cast<std::size_t>(std::clamp(
+      selected,
+      0.0,
+      static_cast<double>(labels.size() - 1)
+  ));
+  Tabs element(std::move(labels), index);
+  if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
+    element = std::move(element).OnChanged(
+        [impl = &runtime, function = *handler, component](std::size_t next) {
+          const quickjs::Value arguments[]{impl->Context().Number(static_cast<double>(next))};
+          impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
+        }
+    );
+  }
+  return element;
+}
+
+View BuildSegmentedButton(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto component = runtime.CurrentComponentPath();
+  auto labels = StringListProperty(props, "labels");
+  if (labels.empty()) {
+    return Text("SegmentedButton requires a non-empty labels array");
+  }
+  const double selected = NumberProperty(props, "selected").value_or(0.0);
+  const auto index = static_cast<std::size_t>(std::clamp(
+      selected,
+      0.0,
+      static_cast<double>(labels.size() - 1)
+  ));
+  SegmentedButton element(std::move(labels), index);
+  if (const auto handler = Property(props, "onChange"); handler && handler->IsFunction()) {
+    element = std::move(element).OnChanged(
+        [impl = &runtime, function = *handler, component](std::size_t next) {
+          const quickjs::Value arguments[]{impl->Context().Number(static_cast<double>(next))};
+          impl->InvokeHandler(function, arguments, DiagnosticPhase::Event, component);
+        }
+    );
   }
   return element;
 }
@@ -524,6 +903,24 @@ View BuildElement(RuntimeImpl& runtime, std::string_view tag, const quickjs::Val
   }
   if (tag == "IndexedPages") {
     return BuildIndexedPages(runtime, props);
+  }
+  if (tag == "VirtualList") {
+    return BuildVirtualList(runtime, props);
+  }
+  if (tag == "VirtualGrid") {
+    return BuildVirtualGrid(runtime, props);
+  }
+  if (tag == "Tabs") {
+    return BuildTabs(runtime, props);
+  }
+  if (tag == "NavigationPane") {
+    return BuildNavigationPane(runtime, props);
+  }
+  if (tag == "NavigationBar") {
+    return BuildNavigationBar(runtime, props);
+  }
+  if (tag == "SegmentedButton") {
+    return BuildSegmentedButton(runtime, props);
   }
   if (tag == "Theme") {
     return BuildTheme(runtime, props);

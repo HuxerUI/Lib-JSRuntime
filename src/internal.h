@@ -1,6 +1,9 @@
 #pragma once
 
 #include <huxerui/lifecycle.h>
+#include <huxerui/modifier.h>
+#include <huxerui/presentation.h>
+#include <huxerui/scroll.h>
 #include <huxerui/quickjs.h>
 #include <huxerui/state.h>
 #include <huxerui/tsx.h>
@@ -8,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -16,6 +20,21 @@
 #include <vector>
 
 namespace huxerui::tsx::detail {
+
+struct TimerRecord;
+
+/// Shared deadline checked by the QuickJS interrupt handler. It is kept
+/// separate from RuntimeImpl so the engine callback remains valid during
+/// construction and teardown.
+struct ExecutionBudget {
+  bool active = false;
+  std::chrono::steady_clock::time_point deadline{};
+  std::function<bool()> user_interrupt;
+
+  [[nodiscard]] bool Expired() const {
+    return active && std::chrono::steady_clock::now() >= deadline;
+  }
+};
 
 /// One composition-owned JavaScript value. HuxerUI state cells keep the handle
 /// alive for as long as the component scope survives.
@@ -26,6 +45,8 @@ struct JsSlot {
 /// State owned by one mounted TSX function component.
 struct ComponentInstance {
   std::uint64_t id = 0;
+  std::string name;
+  std::weak_ptr<ComponentInstance> parent;
   std::vector<State<JsSlot>> states;
   std::vector<std::uint64_t> handles;
 };
@@ -62,10 +83,48 @@ public:
   quickjs::Result<quickjs::Value> Evaluate(std::string_view source, std::string_view filename);
   quickjs::Result<quickjs::Value> Invoke(std::string_view global);
 
-  void ReportError(std::string_view operation, const quickjs::Error& error);
-  void ReportMessage(std::string_view operation, std::string_view message);
+  void ReportError(
+      DiagnosticPhase phase,
+      std::string_view operation,
+      const quickjs::Error& error,
+      std::string_view component_stack = {}
+  );
+  void ReportMessage(
+      DiagnosticPhase phase,
+      std::string_view operation,
+      std::string_view message,
+      std::string_view component_stack = {}
+  );
+  void ReportDiagnostic(Diagnostic diagnostic);
   void Log(LogLevel level, std::string_view message);
-  void InvokeHandler(const quickjs::Value& function, std::span<const quickjs::Value> arguments);
+  void InvokeHandler(
+      const quickjs::Value& function,
+      std::span<const quickjs::Value> arguments,
+      DiagnosticPhase phase = DiagnosticPhase::Event,
+      std::string_view component_stack = {}
+  );
+  [[nodiscard]] bool InvokeDecisionHandler(
+      const quickjs::Value& function,
+      std::span<const quickjs::Value> arguments,
+      DiagnosticPhase phase = DiagnosticPhase::Event,
+      std::string_view component_stack = {}
+  );
+
+  [[nodiscard]] View ApplyFocusRef(View view, const quickjs::Value& props);
+  [[nodiscard]] std::optional<huxerui::ScrollController> FindScrollController(
+      const quickjs::Value& ref
+  ) const;
+  [[nodiscard]] View ApplyMenuAnchor(View view, const quickjs::Value& props);
+  [[nodiscard]] View ApplyPopupAnchor(View view, const quickjs::Value& props);
+
+  /// @return One component's ancestry, outermost first, joined with " > ".
+  [[nodiscard]] std::string ComponentPath(const ComponentInstance& instance) const;
+  /// @return The component currently rendering or executing an effect/event.
+  [[nodiscard]] std::string CurrentComponentPath() const;
+  [[nodiscard]] View ErrorView(std::string_view message) const;
+  [[nodiscard]] const std::string& ActiveComponentPath() const { return active_component_path_; }
+  void SetActiveComponentPath(std::string path) { active_component_path_ = std::move(path); }
+  [[nodiscard]] std::optional<Diagnostic> LastDiagnostic() const { return last_diagnostic_; }
 
   [[nodiscard]] std::uint64_t AllocateInstanceId() noexcept { return next_instance_id++; }
 
@@ -81,8 +140,10 @@ public:
   };
 
   RenderFrame* CurrentFrame() const noexcept { return current_frame_; }
+  void SetCurrentFrame(RenderFrame* frame) noexcept { current_frame_ = frame; }
 
   RuntimeOptions options;
+  std::shared_ptr<ExecutionBudget> budget;
   quickjs::Runtime engine;
   quickjs::Context context_;
 
@@ -113,12 +174,154 @@ private:
   [[nodiscard]] quickjs::Value HostUseEffect(
       quickjs::Context& owner, std::span<const quickjs::Value> arguments
   );
-
-  [[nodiscard]] View ErrorView(std::string_view message) const;
+  [[nodiscard]] quickjs::Value HostSetTimer(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments,
+      bool repeating
+  );
+  [[nodiscard]] quickjs::Value HostClearTimer(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseFocusRequester(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostRequestFocus(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseScrollController(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseToast(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseDialog(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowDialog(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowDialogContent(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissDialog(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseMenu(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowMenu(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowMenuAnchored(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissMenu(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseSnackBar(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowSnackBar(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissSnackBar(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUseBottomSheet(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowBottomSheet(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissBottomSheet(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostUsePopup(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowPopup(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissPopup(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostShowToast(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostDismissToast(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostScrollTo(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostScrollBy(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostScrollToItem(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostScrollOffset(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostScrollMetrics(
+      quickjs::Context& owner,
+      std::span<const quickjs::Value> arguments
+  );
+  void ScheduleTimer(const std::shared_ptr<TimerRecord>& timer);
+  void FireTimer(const std::shared_ptr<TimerRecord>& timer);
+  void CancelTimers() noexcept;
 
   quickjs::ModuleLoader user_loader_;
   RenderFrame* current_frame_ = nullptr;
   std::uint64_t next_effect_dependency_ = 1;
+  std::string active_component_path_;
+  std::optional<Diagnostic> last_diagnostic_;
+  std::uint64_t next_timer_id_ = 1;
+  std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;
+  std::uint64_t next_focus_requester_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::FocusRequester> focus_requesters_;
+  std::uint64_t next_scroll_controller_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::ScrollController> scroll_controllers_;
+  std::uint64_t next_toast_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::ToastHandle> toast_handles_;
+  std::uint64_t next_dialog_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::DialogHandle> dialog_handles_;
+  std::uint64_t next_menu_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::MenuHandle> menu_handles_;
+  std::uint64_t next_snack_bar_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::SnackBarHandle> snack_bar_handles_;
+  std::uint64_t next_bottom_sheet_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::BottomSheetHandle> bottom_sheet_handles_;
+  std::uint64_t next_popup_handle_id_ = 1;
+  std::unordered_map<std::uint64_t, huxerui::PopupHandle> popup_handles_;
 };
 
 } // namespace huxerui::tsx::detail

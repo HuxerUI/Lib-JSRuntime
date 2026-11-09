@@ -686,12 +686,13 @@ View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& pro
   if (const auto value = Property(props, "textAlign")) {
     (void)value; // Text consumes this property itself; ignore on other elements.
   }
-  if (const auto handler = Property(props, "onClick"); handler && handler->IsFunction()) {
-    view = std::move(view).OnClick([impl = &runtime, function = *handler] {
-      impl->InvokeHandler(function, {});
-    });
+  if (const auto tooltip = StringProperty(props, "tooltip"); tooltip && !tooltip->empty()) {
+    view = std::move(view).With(huxerui::Tooltip(*tooltip));
   }
-  return view;
+  view = runtime.ApplyMenuAnchor(std::move(view), props);
+  view = runtime.ApplyPopupAnchor(std::move(view), props);
+  view = runtime.ApplyFocusRef(std::move(view), props);
+  return ApplyEventProps(runtime, std::move(view), props);
 }
 
 } // namespace huxerui::tsx::detail

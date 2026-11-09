@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <source_location>
@@ -11,6 +13,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <huxerui/task.h>
 
 #include "embedded_js.h"
 #include "props.h"
@@ -22,9 +26,26 @@ namespace {
 constexpr std::string_view kJsxRuntimeModule =
     "export { jsx, jsxs, Fragment } from \"@huxerui/tsx\";\n";
 
-quickjs::RuntimeOptions MakeEngineOptions(std::size_t memory_limit_bytes) {
+quickjs::RuntimeOptions MakeEngineOptions(
+    const RuntimeOptions& source,
+    std::shared_ptr<ExecutionBudget> budget
+) {
+  budget->user_interrupt = source.should_interrupt;
   quickjs::RuntimeOptions options;
-  options.memory_limit_bytes = memory_limit_bytes;
+  options.memory_limit_bytes = source.memory_limit_bytes;
+  options.stack_limit_bytes = source.stack_limit_bytes;
+  options.should_interrupt = [budget = std::move(budget)]() {
+    if (budget->Expired()) {
+      return true;
+    }
+    return budget->user_interrupt && budget->user_interrupt();
+  };
+  return options;
+}
+
+quickjs::EvaluateOptions MakeEvaluateOptions(const RuntimeOptions& source) {
+  quickjs::EvaluateOptions options;
+  options.time_limit = source.evaluation_time_limit;
   return options;
 }
 
@@ -44,6 +65,46 @@ State<JsSlot> AcquireSlotState(quickjs::Value initial) {
   return AcquireStateCell(JsSlot{std::move(initial)});
 }
 
+huxerui::FocusRequester AcquireFocusRequester() {
+  const auto acquire = &huxerui::UseFocusRequester;
+  return acquire(std::source_location::current());
+}
+
+huxerui::ScrollController AcquireScrollController(float initial_offset) {
+  const auto acquire = &huxerui::UseScrollController;
+  return acquire(initial_offset, std::source_location::current());
+}
+
+huxerui::ToastHandle AcquireToastHandle() {
+  const auto acquire = &huxerui::UseToast;
+  return acquire();
+}
+
+huxerui::DialogHandle AcquireDialogHandle() {
+  const auto acquire = &huxerui::UseDialog;
+  return acquire();
+}
+
+huxerui::MenuHandle AcquireMenuHandle() {
+  const auto acquire = &huxerui::UseMenu;
+  return acquire();
+}
+
+huxerui::SnackBarHandle AcquireSnackBarHandle() {
+  const auto acquire = &huxerui::UseSnackBar;
+  return acquire();
+}
+
+huxerui::BottomSheetHandle AcquireBottomSheetHandle() {
+  const auto acquire = &huxerui::UseBottomSheet;
+  return acquire();
+}
+
+huxerui::PopupHandle AcquirePopupHandle() {
+  const auto acquire = &huxerui::UsePopup;
+  return acquire();
+}
+
 std::string RevisionName(std::string_view name, std::uint64_t revision) {
   const auto dot = name.rfind('.');
   const std::string suffix = ".r" + std::to_string(revision);
@@ -53,29 +114,218 @@ std::string RevisionName(std::string_view name, std::uint64_t revision) {
   return std::string(name.substr(0, dot)) + suffix + std::string(name.substr(dot));
 }
 
-std::string DescribeError(const quickjs::Error& error) {
-  std::string message = error.Message();
-  if (!error.Filename().empty()) {
-    message += " (";
-    message += error.Filename();
-    if (error.Line() > 0) {
-      message += ":";
-      message += std::to_string(error.Line());
-      if (error.Column() > 0) {
-        message += ":";
-        message += std::to_string(error.Column());
+const char* ErrorCodeName(quickjs::ErrorCode code) noexcept {
+  switch (code) {
+    case quickjs::ErrorCode::Exception:
+      return "Exception";
+    case quickjs::ErrorCode::Syntax:
+      return "Syntax";
+    case quickjs::ErrorCode::OutOfMemory:
+      return "OutOfMemory";
+    case quickjs::ErrorCode::StackOverflow:
+      return "StackOverflow";
+    case quickjs::ErrorCode::Interrupted:
+      return "Interrupted";
+    case quickjs::ErrorCode::Module:
+      return "Module";
+    case quickjs::ErrorCode::Type:
+      return "Type";
+    case quickjs::ErrorCode::Closed:
+      return "Closed";
+    case quickjs::ErrorCode::Unsupported:
+      return "Unsupported";
+  }
+  return "Unknown";
+}
+
+const char* PhaseName(DiagnosticPhase phase) noexcept {
+  switch (phase) {
+    case DiagnosticPhase::Load:
+      return "load";
+    case DiagnosticPhase::Reload:
+      return "reload";
+    case DiagnosticPhase::Render:
+      return "render";
+    case DiagnosticPhase::Effect:
+      return "effect";
+    case DiagnosticPhase::Event:
+      return "event";
+    case DiagnosticPhase::Evaluation:
+      return "evaluation";
+    case DiagnosticPhase::Timer:
+      return "timer";
+    case DiagnosticPhase::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+std::string FormatDiagnostic(const Diagnostic& diagnostic) {
+  std::string text;
+  text += PhaseName(diagnostic.phase);
+  text += " [";
+  text += ErrorCodeName(diagnostic.code);
+  text += "]: ";
+  text += diagnostic.operation;
+  if (!diagnostic.message.empty()) {
+    text += ": ";
+    text += diagnostic.message;
+  }
+  if (!diagnostic.filename.empty()) {
+    text += " (";
+    text += diagnostic.filename;
+    if (diagnostic.line > 0) {
+      text += ":";
+      text += std::to_string(diagnostic.line);
+      if (diagnostic.column > 0) {
+        text += ":";
+        text += std::to_string(diagnostic.column);
       }
     }
-    message += ")";
+    text += ")";
   }
-  if (!error.Stack().empty()) {
-    message += "\n";
-    message += error.Stack();
+  if (!diagnostic.stack.empty()) {
+    text += "\n";
+    text += diagnostic.stack;
   }
-  return message;
+  if (!diagnostic.component_stack.empty()) {
+    text += "\ncomponent stack: ";
+    text += diagnostic.component_stack;
+  }
+  return text;
+}
+
+std::string FunctionName(const quickjs::Value& function) {
+  const auto name = function.GetProperty("name");
+  if (name.Succeeded()) {
+    const auto text = name.Value().ToString();
+    if (text.Succeeded() && !text.Value().empty()) {
+      return text.Value();
+    }
+  }
+  return "<anonymous>";
+}
+
+std::string FirstLine(std::string_view text) {
+  const auto newline = text.find('\n');
+  return std::string(text.substr(0, newline));
+}
+
+class ComponentPathScope final {
+public:
+  ComponentPathScope(RuntimeImpl& runtime, std::string_view path)
+      : runtime_(runtime), previous_(runtime.ActiveComponentPath()) {
+    runtime_.SetActiveComponentPath(std::string(path));
+  }
+
+  ~ComponentPathScope() { runtime_.SetActiveComponentPath(std::move(previous_)); }
+
+  ComponentPathScope(const ComponentPathScope&) = delete;
+  ComponentPathScope& operator=(const ComponentPathScope&) = delete;
+
+private:
+  RuntimeImpl& runtime_;
+  std::string previous_;
+};
+
+class OperationBudgetScope final {
+public:
+  OperationBudgetScope(ExecutionBudget& budget, std::chrono::milliseconds limit)
+      : budget_(budget), previous_active_(budget.active), previous_deadline_(budget.deadline) {
+    if (limit.count() > 0) {
+      budget_.active = true;
+      budget_.deadline = std::chrono::steady_clock::now() + limit;
+    }
+  }
+
+  ~OperationBudgetScope() {
+    budget_.active = previous_active_;
+    budget_.deadline = previous_deadline_;
+  }
+
+  OperationBudgetScope(const OperationBudgetScope&) = delete;
+  OperationBudgetScope& operator=(const OperationBudgetScope&) = delete;
+
+private:
+  ExecutionBudget& budget_;
+  bool previous_active_ = false;
+  std::chrono::steady_clock::time_point previous_deadline_{};
+};
+
+class CurrentFrameGuard final {
+public:
+  CurrentFrameGuard(RuntimeImpl& runtime, RuntimeImpl::RenderFrame& frame)
+      : runtime_(runtime), previous_(runtime.CurrentFrame()) {
+    runtime_.SetCurrentFrame(&frame);
+  }
+
+  ~CurrentFrameGuard() { runtime_.SetCurrentFrame(previous_); }
+
+  CurrentFrameGuard(const CurrentFrameGuard&) = delete;
+  CurrentFrameGuard& operator=(const CurrentFrameGuard&) = delete;
+
+private:
+  RuntimeImpl& runtime_;
+  RuntimeImpl::RenderFrame* previous_ = nullptr;
+};
+
+std::vector<huxerui::MenuEntry> BuildMenuEntries(
+    RuntimeImpl& runtime,
+    const quickjs::Value& entries_value,
+    std::string_view component
+) {
+  std::vector<huxerui::MenuEntry> entries;
+  if (!entries_value.IsArray()) {
+    return entries;
+  }
+  const auto length = entries_value.Length();
+  if (!length.Succeeded() || length.Value() < 0) {
+    return entries;
+  }
+  entries.reserve(static_cast<std::size_t>(length.Value()));
+  for (std::int64_t index = 0; index < length.Value(); ++index) {
+    const auto value = entries_value.GetElement(static_cast<std::uint32_t>(index));
+    if (!value.Succeeded() || !value.Value().IsObject()) {
+      continue;
+    }
+    if (BoolProperty(value.Value(), "section").value_or(false)) {
+      entries.emplace_back(huxerui::MenuSection{});
+      continue;
+    }
+    const auto label = StringProperty(value.Value(), "label");
+    if (!label || label->empty()) {
+      continue;
+    }
+    auto callback = std::function<void()>([] {});
+    if (const auto function = Property(value.Value(), "onSelect");
+        function && function->IsFunction()) {
+      callback = [impl = &runtime, function = *function, component]() {
+        impl->InvokeHandler(function, {}, DiagnosticPhase::Event, component);
+      };
+    }
+    huxerui::MenuItem item(*label, std::move(callback));
+    if (const auto disabled = BoolProperty(value.Value(), "disabled"); disabled) {
+      item = std::move(item).Enabled(!*disabled);
+    }
+    if (const auto checked = BoolProperty(value.Value(), "checked"); checked) {
+      item = std::move(item).Checked(*checked);
+    }
+    entries.emplace_back(std::move(item));
+  }
+  return entries;
 }
 
 } // namespace
+
+struct TimerRecord {
+  std::uint64_t id = 0;
+  bool repeating = false;
+  bool cancelled = false;
+  std::chrono::duration<double, std::milli> delay{0};
+  quickjs::Value callback;
+  std::string component_stack;
+  huxerui::TaskHandle handle;
+};
 
 bool JsDeps::operator==(const JsDeps& other) const {
   if (always_run != other.always_run) {
@@ -95,13 +345,16 @@ bool JsDeps::operator==(const JsDeps& other) const {
 
 RuntimeImpl::RuntimeImpl(RuntimeOptions options_in)
     : options(std::move(options_in)),
-      engine(MakeEngineOptions(options.memory_limit_bytes)),
+      budget(std::make_shared<ExecutionBudget>()),
+      engine(MakeEngineOptions(options, budget)),
       context_(engine) {
   InstallHostFunctions();
   InstallModuleLoader();
 }
 
-RuntimeImpl::~RuntimeImpl() = default;
+RuntimeImpl::~RuntimeImpl() {
+  CancelTimers();
+}
 
 void RuntimeImpl::InstallHostFunctions() {
   auto install = [this](std::string_view name, quickjs::NativeFunction function, std::size_t arity) {
@@ -128,6 +381,102 @@ void RuntimeImpl::InstallHostFunctions() {
   }, 1);
   install("__huxerui_useEffect", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     return HostUseEffect(owner, arguments);
+  }, 2);
+  install("setTimeout", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostSetTimer(owner, arguments, false);
+  }, 2);
+  install("setInterval", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostSetTimer(owner, arguments, true);
+  }, 2);
+  install("clearTimeout", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostClearTimer(owner, arguments);
+  }, 1);
+  install("clearInterval", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostClearTimer(owner, arguments);
+  }, 1);
+  install("__huxerui_useFocusRequester", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseFocusRequester(owner, arguments);
+  }, 0);
+  install("__huxerui_requestFocus", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostRequestFocus(owner, arguments);
+  }, 1);
+  install("__huxerui_useScrollController", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseScrollController(owner, arguments);
+  }, 1);
+  install("__huxerui_scrollTo", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostScrollTo(owner, arguments);
+  }, 2);
+  install("__huxerui_scrollBy", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostScrollBy(owner, arguments);
+  }, 2);
+  install("__huxerui_scrollToItem", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostScrollToItem(owner, arguments);
+  }, 3);
+  install("__huxerui_scrollOffset", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostScrollOffset(owner, arguments);
+  }, 1);
+  install("__huxerui_scrollMetrics", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostScrollMetrics(owner, arguments);
+  }, 1);
+  install("__huxerui_useToast", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseToast(owner, arguments);
+  }, 0);
+  install("__huxerui_showToast", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowToast(owner, arguments);
+  }, 3);
+  install("__huxerui_dismissToast", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissToast(owner, arguments);
+  }, 2);
+  install("__huxerui_useDialog", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseDialog(owner, arguments);
+  }, 0);
+  install("__huxerui_showDialog", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowDialog(owner, arguments);
+  }, 2);
+  install("__huxerui_showDialogContent", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowDialogContent(owner, arguments);
+  }, 3);
+  install("__huxerui_dismissDialog", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissDialog(owner, arguments);
+  }, 2);
+  install("__huxerui_useMenu", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseMenu(owner, arguments);
+  }, 0);
+  install("__huxerui_showMenu", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowMenu(owner, arguments);
+  }, 4);
+  install("__huxerui_showMenuAnchored", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowMenuAnchored(owner, arguments);
+  }, 2);
+  install("__huxerui_dismissMenu", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissMenu(owner, arguments);
+  }, 2);
+  install("__huxerui_useSnackBar", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseSnackBar(owner, arguments);
+  }, 0);
+  install("__huxerui_showSnackBar", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowSnackBar(owner, arguments);
+  }, 5);
+  install("__huxerui_dismissSnackBar", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissSnackBar(owner, arguments);
+  }, 2);
+  install("__huxerui_useBottomSheet", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUseBottomSheet(owner, arguments);
+  }, 0);
+  install("__huxerui_showBottomSheet", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowBottomSheet(owner, arguments);
+  }, 3);
+  install("__huxerui_dismissBottomSheet", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissBottomSheet(owner, arguments);
+  }, 2);
+  install("__huxerui_usePopup", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostUsePopup(owner, arguments);
+  }, 0);
+  install("__huxerui_showPopup", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostShowPopup(owner, arguments);
+  }, 3);
+  install("__huxerui_dismissPopup", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostDismissPopup(owner, arguments);
   }, 2);
   install("__huxerui_log", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     if (arguments.size() < 2) {
@@ -181,44 +530,187 @@ void RuntimeImpl::InstallModuleLoader() {
   });
 }
 
-void RuntimeImpl::ReportError(std::string_view operation, const quickjs::Error& error) {
-  const std::string message = std::string(operation) + ": " + DescribeError(error);
-  if (options.on_log) {
-    options.on_log(LogLevel::Error, message);
-  }
-  if (options.on_error) {
-    options.on_error(message);
-  }
+void RuntimeImpl::ReportError(
+    DiagnosticPhase phase,
+    std::string_view operation,
+    const quickjs::Error& error,
+    std::string_view component_stack
+) {
+  Diagnostic diagnostic;
+  diagnostic.phase = phase;
+  diagnostic.code = error.Code();
+  diagnostic.operation = std::string(operation);
+  diagnostic.message = error.Message();
+  diagnostic.filename = error.Filename();
+  diagnostic.line = error.Line();
+  diagnostic.column = error.Column();
+  diagnostic.stack = error.Stack();
+  diagnostic.component_stack = std::string(component_stack);
+  ReportDiagnostic(std::move(diagnostic));
 }
 
-void RuntimeImpl::ReportMessage(std::string_view operation, std::string_view message) {
-  const std::string full = std::string(operation) + ": " + std::string(message);
+void RuntimeImpl::ReportMessage(
+    DiagnosticPhase phase,
+    std::string_view operation,
+    std::string_view message,
+    std::string_view component_stack
+) {
+  Diagnostic diagnostic;
+  diagnostic.phase = phase;
+  diagnostic.code = quickjs::ErrorCode::Exception;
+  diagnostic.operation = std::string(operation);
+  diagnostic.message = std::string(message);
+  diagnostic.component_stack = std::string(component_stack);
+  ReportDiagnostic(std::move(diagnostic));
+}
+
+void RuntimeImpl::ReportDiagnostic(Diagnostic diagnostic) {
+  diagnostic.description = FormatDiagnostic(diagnostic);
+  last_diagnostic_ = diagnostic;
+  if (options.on_diagnostic) {
+    try {
+      options.on_diagnostic(diagnostic);
+    } catch (...) {
+      // A diagnostic sink must not mask the original JavaScript failure.
+    }
+  }
   if (options.on_log) {
-    options.on_log(LogLevel::Error, full);
+    try {
+      options.on_log(LogLevel::Error, diagnostic.description);
+    } catch (...) {
+    }
   }
   if (options.on_error) {
-    options.on_error(full);
+    try {
+      options.on_error(diagnostic.description);
+    } catch (...) {
+    }
   }
 }
 
 void RuntimeImpl::Log(LogLevel level, std::string_view message) {
   if (options.on_log) {
-    options.on_log(level, message);
+    try {
+      options.on_log(level, message);
+    } catch (...) {
+    }
   }
 }
 
-void RuntimeImpl::InvokeHandler(const quickjs::Value& function, std::span<const quickjs::Value> arguments) {
+View RuntimeImpl::ApplyMenuAnchor(View view, const quickjs::Value& props) {
+  const auto anchor = Property(props, "menuAnchor");
+  if (!anchor || !anchor->IsObject()) {
+    return view;
+  }
+  const auto id = NumberProperty(*anchor, "id");
+  if (!id || !std::isfinite(*id)) {
+    return view;
+  }
+  const auto found = menu_handles_.find(static_cast<std::uint64_t>(*id));
+  if (found == menu_handles_.end()) {
+    return view;
+  }
+  return std::move(view).With(found->second.Anchor());
+}
+
+View RuntimeImpl::ApplyPopupAnchor(View view, const quickjs::Value& props) {
+  const auto anchor = Property(props, "popupAnchor");
+  if (!anchor || !anchor->IsObject()) {
+    return view;
+  }
+  const auto id = NumberProperty(*anchor, "id");
+  if (!id || !std::isfinite(*id)) {
+    return view;
+  }
+  const auto found = popup_handles_.find(static_cast<std::uint64_t>(*id));
+  if (found == popup_handles_.end()) {
+    return view;
+  }
+  return std::move(view).With(found->second.Anchor());
+}
+
+View RuntimeImpl::ApplyFocusRef(View view, const quickjs::Value& props) {
+  const auto ref = Property(props, "ref");
+  const auto focus_ref = ref ? ref : Property(props, "focusRef");
+  if (!focus_ref || !focus_ref->IsObject()) {
+    return view;
+  }
+  const auto id = NumberProperty(*focus_ref, "id");
+  if (!id || !std::isfinite(*id)) {
+    return view;
+  }
+  const auto found = focus_requesters_.find(static_cast<std::uint64_t>(*id));
+  if (found == focus_requesters_.end()) {
+    return view;
+  }
+  return std::move(view).With(FocusTarget{found->second});
+}
+
+std::string RuntimeImpl::ComponentPath(const ComponentInstance& instance) const {
+  std::vector<std::string> chain;
+  chain.push_back(instance.name);
+  auto parent = instance.parent.lock();
+  while (parent) {
+    chain.push_back(parent->name);
+    parent = parent->parent.lock();
+  }
+
+  std::string path;
+  for (auto iterator = chain.rbegin(); iterator != chain.rend(); ++iterator) {
+    if (!path.empty()) {
+      path += " > ";
+    }
+    path += *iterator;
+  }
+  return path;
+}
+
+std::string RuntimeImpl::CurrentComponentPath() const {
+  if (current_frame_ != nullptr && current_frame_->instance != nullptr) {
+    return ComponentPath(*current_frame_->instance);
+  }
+  return active_component_path_;
+}
+
+void RuntimeImpl::InvokeHandler(
+    const quickjs::Value& function,
+    std::span<const quickjs::Value> arguments,
+    DiagnosticPhase phase,
+    std::string_view component_stack
+) {
   if (!function.IsFunction()) {
     return;
   }
+  ComponentPathScope path_scope(*this, component_stack);
+  OperationBudgetScope budget_scope(*budget, options.operation_time_limit);
   const auto result = function.Call(arguments);
   if (!result.Succeeded()) {
-    ReportError("event handler", result.Error());
+    ReportError(phase, "event handler", result.Error(), component_stack);
   }
 }
 
+bool RuntimeImpl::InvokeDecisionHandler(
+    const quickjs::Value& function,
+    std::span<const quickjs::Value> arguments,
+    DiagnosticPhase phase,
+    std::string_view component_stack
+) {
+  if (!function.IsFunction()) {
+    return false;
+  }
+  ComponentPathScope path_scope(*this, component_stack);
+  OperationBudgetScope budget_scope(*budget, options.operation_time_limit);
+  const auto result = function.Call(arguments);
+  if (!result.Succeeded()) {
+    ReportError(phase, "event handler", result.Error(), component_stack);
+    return false;
+  }
+  const auto truthy = result.Value().ToBoolean();
+  return truthy.Succeeded() && truthy.Value();
+}
+
 View RuntimeImpl::ErrorView(std::string_view message) const {
-  return Text(std::string("TSX error: ") + std::string(message));
+  return Text("TSX error: " + FirstLine(message));
 }
 
 quickjs::Value RuntimeImpl::HostUseState(quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
@@ -230,6 +722,7 @@ quickjs::Value RuntimeImpl::HostUseState(quickjs::Context& owner, std::span<cons
   const std::size_t index = frame->next_hook++;
   quickjs::Value initial = arguments.empty() ? owner.Undefined() : arguments[0];
   if (index >= instance.states.size() && initial.IsFunction()) {
+    OperationBudgetScope budget_scope(*budget, options.operation_time_limit);
     const auto produced = initial.Call();
     if (!produced.Succeeded()) {
       throw std::runtime_error(
@@ -349,19 +842,22 @@ quickjs::Value RuntimeImpl::HostUseEffect(quickjs::Context& owner, std::span<con
   }
 
   const quickjs::Value effect = arguments[0];
+  const std::string component = CurrentComponentPath();
   huxerui::Lifecycle(
-      [impl = this, effect]() -> std::function<void()> {
+      [impl = this, effect, component]() -> std::function<void()> {
+        ComponentPathScope path_scope(*impl, component);
+        OperationBudgetScope budget_scope(*impl->budget, impl->options.operation_time_limit);
         const auto result = effect.Call();
         if (!result.Succeeded()) {
-          impl->ReportError("useEffect", result.Error());
-          return {};
+          impl->ReportError(DiagnosticPhase::Effect, "useEffect", result.Error(), component);
+          return std::function<void()>([] {});
         }
         const auto cleanup = result.Value();
         if (!cleanup.IsFunction()) {
-          return {};
+          return std::function<void()>([] {});
         }
-        return std::function<void()>([impl, cleanup]() {
-          impl->InvokeHandler(cleanup, {});
+        return std::function<void()>([impl, cleanup, component]() {
+          impl->InvokeHandler(cleanup, {}, DiagnosticPhase::Effect, component);
         });
       },
       std::move(deps)
@@ -369,10 +865,859 @@ quickjs::Value RuntimeImpl::HostUseEffect(quickjs::Context& owner, std::span<con
   return owner.Undefined();
 }
 
-quickjs::Result<void> RuntimeImpl::Load(std::string_view source, std::string_view filename) {
-  const auto result = context_.EvaluateModule(source, filename);
+quickjs::Value RuntimeImpl::HostSetTimer(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments,
+    bool repeating
+) {
+  if (arguments.empty() || !arguments[0].IsFunction()) {
+    throw std::runtime_error(
+        std::string(repeating ? "setInterval" : "setTimeout") +
+        "() requires a callback function"
+    );
+  }
+
+  double milliseconds = 0.0;
+  if (arguments.size() > 1) {
+    const auto number = arguments[1].ToNumber();
+    if (!number.Succeeded()) {
+      throw std::runtime_error("Timer delay must be a number");
+    }
+    if (std::isfinite(number.Value()) && number.Value() > 0.0) {
+      milliseconds = std::min(number.Value(), 86'400'000.0);
+    }
+  }
+
+  auto timer = std::make_shared<TimerRecord>();
+  timer->id = next_timer_id_++;
+  timer->repeating = repeating;
+  timer->delay = std::chrono::duration<double, std::milli>(milliseconds);
+  timer->callback = arguments[0];
+  timer->component_stack = CurrentComponentPath();
+  timers_.emplace(timer->id, timer);
+
+  try {
+    ScheduleTimer(timer);
+  } catch (const std::exception& error) {
+    timers_.erase(timer->id);
+    ReportMessage(
+        DiagnosticPhase::Timer,
+        repeating ? "setInterval" : "setTimeout",
+        error.what(),
+        timer->component_stack
+    );
+    throw;
+  }
+  return owner.Number(static_cast<double>(timer->id));
+}
+
+quickjs::Value RuntimeImpl::HostClearTimer(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.empty()) {
+    return owner.Undefined();
+  }
+  const auto number = arguments[0].ToNumber();
+  if (!number.Succeeded() || !std::isfinite(number.Value())) {
+    return owner.Undefined();
+  }
+  const auto id = static_cast<std::uint64_t>(number.Value());
+  const auto found = timers_.find(id);
+  if (found == timers_.end()) {
+    return owner.Undefined();
+  }
+  const auto timer = std::move(found->second);
+  timers_.erase(found);
+  timer->cancelled = true;
+  timer->handle.Cancel();
+  return owner.Undefined();
+}
+
+void RuntimeImpl::ScheduleTimer(const std::shared_ptr<TimerRecord>& timer) {
+  auto tasks = huxerui::UseApplicationTaskScope();
+  auto* self = this;
+  timer->handle = tasks.Launch([self, timer]() -> huxerui::Task<void> {
+    while (!timer->cancelled) {
+      co_await huxerui::Delay(timer->delay);
+      if (timer->cancelled) {
+        break;
+      }
+      self->FireTimer(timer);
+      if (!timer->repeating) {
+        break;
+      }
+    }
+  });
+}
+
+void RuntimeImpl::FireTimer(const std::shared_ptr<TimerRecord>& timer) {
+  if (timer->cancelled) {
+    return;
+  }
+  ComponentPathScope path_scope(*this, timer->component_stack);
+  OperationBudgetScope budget_scope(*budget, options.operation_time_limit);
+  const auto result = timer->callback.Call();
   if (!result.Succeeded()) {
-    ReportError("module evaluation", result.Error());
+    ReportError(
+        DiagnosticPhase::Timer,
+        "timer callback",
+        result.Error(),
+        timer->component_stack
+    );
+  }
+  if (!timer->repeating) {
+    timers_.erase(timer->id);
+  }
+}
+
+quickjs::Value RuntimeImpl::HostUseFocusRequester(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto requester = AcquireFocusRequester();
+  const auto id = next_focus_requester_id_++;
+  focus_requesters_.emplace(id, requester);
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostRequestFocus(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.empty()) {
+    return owner.Boolean(false);
+  }
+  const auto number = arguments[0].ToNumber();
+  if (!number.Succeeded() || !std::isfinite(number.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto id = static_cast<std::uint64_t>(number.Value());
+  const auto found = focus_requesters_.find(id);
+  if (found == focus_requesters_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(found->second.RequestFocus());
+}
+
+std::optional<huxerui::ScrollController> RuntimeImpl::FindScrollController(
+    const quickjs::Value& ref
+) const {
+  if (!ref.IsObject()) {
+    return std::nullopt;
+  }
+  const auto id = NumberProperty(ref, "id");
+  if (!id || !std::isfinite(*id)) {
+    return std::nullopt;
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(*id));
+  if (found == scroll_controllers_.end()) {
+    return std::nullopt;
+  }
+  return found->second;
+}
+
+quickjs::Value RuntimeImpl::HostUseScrollController(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  double initial_offset = 0.0;
+  if (!arguments.empty()) {
+    const auto number = arguments[0].ToNumber();
+    if (number.Succeeded() && std::isfinite(number.Value())) {
+      initial_offset = number.Value();
+    }
+  }
+  auto controller = AcquireScrollController(static_cast<float>(initial_offset));
+  const auto id = next_scroll_controller_id_++;
+  scroll_controllers_.emplace(id, controller);
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostScrollTo(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto id = arguments[0].ToNumber();
+  const auto offset = arguments[1].ToNumber();
+  if (!id.Succeeded() || !offset.Succeeded() || !std::isfinite(id.Value())
+      || !std::isfinite(offset.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(id.Value()));
+  if (found == scroll_controllers_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(found->second.ScrollTo(static_cast<float>(offset.Value())));
+}
+
+quickjs::Value RuntimeImpl::HostScrollBy(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto id = arguments[0].ToNumber();
+  const auto delta = arguments[1].ToNumber();
+  if (!id.Succeeded() || !delta.Succeeded() || !std::isfinite(id.Value())
+      || !std::isfinite(delta.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(id.Value()));
+  if (found == scroll_controllers_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(found->second.ScrollBy(static_cast<float>(delta.Value())));
+}
+
+quickjs::Value RuntimeImpl::HostScrollToItem(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto id = arguments[0].ToNumber();
+  const auto index = arguments[1].ToNumber();
+  if (!id.Succeeded() || !index.Succeeded() || !std::isfinite(id.Value())
+      || !std::isfinite(index.Value()) || index.Value() < 0.0) {
+    return owner.Boolean(false);
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(id.Value()));
+  if (found == scroll_controllers_.end()) {
+    return owner.Boolean(false);
+  }
+  ScrollAlignment alignment = ScrollAlignment::Start;
+  if (arguments.size() > 2) {
+    const auto name = arguments[2].ToString();
+    if (name.Succeeded()) {
+      if (name.Value() == "center") {
+        alignment = ScrollAlignment::Center;
+      } else if (name.Value() == "end") {
+        alignment = ScrollAlignment::End;
+      }
+    }
+  }
+  return owner.Boolean(found->second.ScrollToItem(
+      static_cast<std::size_t>(index.Value()),
+      alignment
+  ));
+}
+
+quickjs::Value RuntimeImpl::HostScrollOffset(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.empty()) {
+    return owner.Number(0.0);
+  }
+  const auto id = arguments[0].ToNumber();
+  if (!id.Succeeded() || !std::isfinite(id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(id.Value()));
+  if (found == scroll_controllers_.end()) {
+    return owner.Number(0.0);
+  }
+  return owner.Number(static_cast<double>(found->second.Offset()));
+}
+
+quickjs::Value RuntimeImpl::HostUseToast(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquireToastHandle();
+  const auto id = next_toast_handle_id_++;
+  toast_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowToast(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = toast_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == toast_handles_.end()) {
+    return owner.Number(0.0);
+  }
+  const auto message = arguments[1].ToString();
+  if (!message.Succeeded() || message.Value().empty()) {
+    return owner.Number(0.0);
+  }
+  double duration = 2.0;
+  if (arguments.size() > 2) {
+    const auto value = arguments[2].ToNumber();
+    if (value.Succeeded() && std::isfinite(value.Value()) && value.Value() >= 0.0) {
+      duration = value.Value();
+    }
+  }
+  const auto id = found->second.Show(message.Value(), huxerui::ToastOptions{.duration = duration});
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissToast(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = toast_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == toast_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostUseDialog(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquireDialogHandle();
+  const auto id = next_dialog_handle_id_++;
+  dialog_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowDialog(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = dialog_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == dialog_handles_.end()) {
+    return owner.Number(0.0);
+  }
+
+  const auto& options = arguments[1];
+  const auto title = StringProperty(options, "title").value_or("");
+  const auto message = StringProperty(options, "message").value_or("");
+  const auto positive = StringProperty(options, "positive").value_or("");
+  const auto negative = StringProperty(options, "negative").value_or("");
+  const auto component = CurrentComponentPath();
+
+  auto make_callback = [impl = this, component](const quickjs::Value& function) {
+    if (!function.IsFunction()) {
+      return std::function<void()>();
+    }
+    return std::function<void()>([impl, function, component]() {
+      impl->InvokeHandler(function, {}, DiagnosticPhase::Event, component);
+    });
+  };
+  auto on_positive = std::function<void()>();
+  auto on_negative = std::function<void()>();
+  if (const auto value = Property(options, "onPositive"); value) {
+    on_positive = make_callback(*value);
+  }
+  if (const auto value = Property(options, "onNegative"); value) {
+    on_negative = make_callback(*value);
+  }
+
+  huxerui::DialogOptions dialog_options;
+  if (const auto value = BoolProperty(options, "dismissOnOutsidePress"); value) {
+    dialog_options.dismiss_on_outside_press = *value;
+  }
+  if (const auto value = BoolProperty(options, "dismissOnCancel"); value) {
+    dialog_options.dismiss_on_cancel = *value;
+  }
+
+  huxerui::LayerId id = 0;
+  if (!negative.empty()) {
+    id = found->second.Show(
+        title,
+        message,
+        positive,
+        negative,
+        std::move(on_positive),
+        std::move(on_negative),
+        std::move(dialog_options)
+    );
+  } else {
+    id = found->second.Show(
+        title,
+        message,
+        positive,
+        std::move(on_positive),
+        std::move(dialog_options)
+    );
+  }
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowDialogContent(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 3) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = dialog_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == dialog_handles_.end() || !arguments[1].IsFunction()) {
+    return owner.Number(0.0);
+  }
+
+  const auto& options = arguments[2];
+  huxerui::DialogOptions dialog_options;
+  if (const auto value = BoolProperty(options, "dismissOnOutsidePress"); value) {
+    dialog_options.dismiss_on_outside_press = *value;
+  }
+  if (const auto value = BoolProperty(options, "dismissOnCancel"); value) {
+    dialog_options.dismiss_on_cancel = *value;
+  }
+
+  const auto render = arguments[1];
+  const auto component = CurrentComponentPath();
+  auto content = [impl = this, render, component]() -> View {
+    const auto rendered = render.Call();
+    if (!rendered.Succeeded()) {
+      impl->ReportError(
+          DiagnosticPhase::Render,
+          "dialog content",
+          rendered.Error(),
+          component
+      );
+      return impl->ErrorView(rendered.Error().Message());
+    }
+    return impl->RenderValue(rendered.Value());
+  };
+  const auto id = found->second.Show(std::move(content), std::move(dialog_options));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissDialog(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = dialog_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == dialog_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostUseMenu(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquireMenuHandle();
+  const auto id = next_menu_handle_id_++;
+  menu_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowMenu(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 4) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto x = arguments[1].ToNumber();
+  const auto y = arguments[2].ToNumber();
+  if (!handle_id.Succeeded() || !x.Succeeded() || !y.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(x.Value())
+      || !std::isfinite(y.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = menu_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == menu_handles_.end()) {
+    return owner.Number(0.0);
+  }
+  const auto entries = BuildMenuEntries(*this, arguments[3], CurrentComponentPath());
+  if (entries.empty()) {
+    return owner.Number(0.0);
+  }
+
+  const auto id = found->second.ShowAt(
+      Point{static_cast<float>(x.Value()), static_cast<float>(y.Value())},
+      std::move(entries)
+  );
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowMenuAnchored(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = menu_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == menu_handles_.end()) {
+    return owner.Number(0.0);
+  }
+  auto entries = BuildMenuEntries(*this, arguments[1], CurrentComponentPath());
+  if (entries.empty()) {
+    return owner.Number(0.0);
+  }
+  const auto id = found->second.Show(std::move(entries));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissMenu(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = menu_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == menu_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostUseSnackBar(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquireSnackBarHandle();
+  const auto id = next_snack_bar_handle_id_++;
+  snack_bar_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowSnackBar(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 5) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = snack_bar_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == snack_bar_handles_.end()) {
+    return owner.Number(0.0);
+  }
+  const auto message = arguments[1].ToString();
+  if (!message.Succeeded() || message.Value().empty()) {
+    return owner.Number(0.0);
+  }
+  std::string action;
+  if (arguments[2].IsString()) {
+    const auto text = arguments[2].ToString();
+    if (text.Succeeded()) {
+      action = text.Value();
+    }
+  }
+  std::function<void()> on_action;
+  if (arguments[3].IsFunction()) {
+    const auto callback = arguments[3];
+    const auto component = CurrentComponentPath();
+    on_action = [impl = this, callback, component]() {
+      impl->InvokeHandler(callback, {}, DiagnosticPhase::Event, component);
+    };
+  }
+  huxerui::SnackBarOptions options;
+  if (arguments[4].IsNumber()) {
+    const auto duration = arguments[4].ToNumber();
+    if (duration.Succeeded() && std::isfinite(duration.Value())) {
+      if (duration.Value() < 0.0) {
+        options.duration = std::nullopt;
+      } else {
+        options.duration = duration.Value();
+      }
+    }
+  }
+  huxerui::LayerId id = 0;
+  if (!action.empty() && on_action) {
+    id = found->second.Show(message.Value(), action, std::move(on_action), options);
+  } else {
+    id = found->second.Show(message.Value(), options);
+  }
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissSnackBar(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = snack_bar_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == snack_bar_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostUseBottomSheet(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquireBottomSheetHandle();
+  const auto id = next_bottom_sheet_handle_id_++;
+  bottom_sheet_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowBottomSheet(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 3) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = bottom_sheet_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == bottom_sheet_handles_.end() || !arguments[1].IsFunction()) {
+    return owner.Number(0.0);
+  }
+
+  const auto& options = arguments[2];
+  huxerui::BottomSheetOptions sheet_options;
+  if (const auto value = BoolProperty(options, "dismissOnOutsidePress"); value) {
+    sheet_options.dismiss_on_outside_press = *value;
+  }
+  if (const auto value = BoolProperty(options, "dismissOnCancel"); value) {
+    sheet_options.dismiss_on_cancel = *value;
+  }
+
+  const auto render = arguments[1];
+  const auto component = CurrentComponentPath();
+  auto content = [impl = this, render, component]() -> View {
+    const auto rendered = render.Call();
+    if (!rendered.Succeeded()) {
+      impl->ReportError(
+          DiagnosticPhase::Render,
+          "bottom sheet content",
+          rendered.Error(),
+          component
+      );
+      return impl->ErrorView(rendered.Error().Message());
+    }
+    return impl->RenderValue(rendered.Value());
+  };
+  const auto id = found->second.Show(std::move(content), std::move(sheet_options));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissBottomSheet(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = bottom_sheet_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == bottom_sheet_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostUsePopup(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  (void)arguments;
+  auto handle = AcquirePopupHandle();
+  const auto id = next_popup_handle_id_++;
+  popup_handles_.emplace(id, std::move(handle));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostShowPopup(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 3) {
+    return owner.Number(0.0);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  if (!handle_id.Succeeded() || !std::isfinite(handle_id.Value())) {
+    return owner.Number(0.0);
+  }
+  const auto found = popup_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == popup_handles_.end() || !arguments[1].IsFunction()) {
+    return owner.Number(0.0);
+  }
+
+  const auto& options = arguments[2];
+  huxerui::PopupOptions popup_options;
+  if (const auto value = BoolProperty(options, "dismissOnOutsidePress"); value) {
+    popup_options.dismiss_on_outside_press = *value;
+  }
+  if (const auto value = BoolProperty(options, "dismissOnCancel"); value) {
+    popup_options.dismiss_on_cancel = *value;
+  }
+  if (const auto value = BoolProperty(options, "trapFocus"); value) {
+    popup_options.trap_focus = *value;
+  }
+  if (const auto value = BoolProperty(options, "retainAnchorFocus"); value) {
+    popup_options.retain_anchor_focus = *value;
+  }
+
+  const auto render = arguments[1];
+  const auto component = CurrentComponentPath();
+  auto content = [impl = this, render, component]() -> View {
+    const auto rendered = render.Call();
+    if (!rendered.Succeeded()) {
+      impl->ReportError(
+          DiagnosticPhase::Render,
+          "popup content",
+          rendered.Error(),
+          component
+      );
+      return impl->ErrorView(rendered.Error().Message());
+    }
+    return impl->RenderValue(rendered.Value());
+  };
+  const auto id = found->second.Show(std::move(content), std::move(popup_options));
+  return owner.Number(static_cast<double>(id));
+}
+
+quickjs::Value RuntimeImpl::HostDismissPopup(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.size() < 2) {
+    return owner.Boolean(false);
+  }
+  const auto handle_id = arguments[0].ToNumber();
+  const auto layer_id = arguments[1].ToNumber();
+  if (!handle_id.Succeeded() || !layer_id.Succeeded()
+      || !std::isfinite(handle_id.Value()) || !std::isfinite(layer_id.Value())) {
+    return owner.Boolean(false);
+  }
+  const auto found = popup_handles_.find(static_cast<std::uint64_t>(handle_id.Value()));
+  if (found == popup_handles_.end()) {
+    return owner.Boolean(false);
+  }
+  return owner.Boolean(
+      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+  );
+}
+
+quickjs::Value RuntimeImpl::HostScrollMetrics(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  if (arguments.empty()) {
+    return owner.Undefined();
+  }
+  const auto id = arguments[0].ToNumber();
+  if (!id.Succeeded() || !std::isfinite(id.Value())) {
+    return owner.Undefined();
+  }
+  const auto found = scroll_controllers_.find(static_cast<std::uint64_t>(id.Value()));
+  if (found == scroll_controllers_.end()) {
+    return owner.Undefined();
+  }
+  auto object = owner.NewObject();
+  if (!object.Succeeded()) {
+    return owner.Undefined();
+  }
+  const auto& controller = found->second;
+  auto set = [&](std::string_view name, double value) {
+    static_cast<void>(object.Value().SetProperty(name, owner.Number(value)));
+  };
+  set("offset", static_cast<double>(controller.Offset()));
+  set("maxOffset", static_cast<double>(controller.MaxOffset()));
+  set("viewportExtent", static_cast<double>(controller.ViewportExtent()));
+  set("contentExtent", static_cast<double>(controller.ContentExtent()));
+  static_cast<void>(
+      object.Value().SetProperty("connected", owner.Boolean(controller.IsConnected()))
+  );
+  return object.Value();
+}
+
+void RuntimeImpl::CancelTimers() noexcept {
+  for (auto& [id, timer] : timers_) {
+    (void)id;
+    timer->cancelled = true;
+    timer->handle.Cancel();
+  }
+  timers_.clear();
+}
+
+quickjs::Result<void> RuntimeImpl::Load(std::string_view source, std::string_view filename) {
+  const auto result = context_.EvaluateModule(source, filename, MakeEvaluateOptions(options));
+  if (!result.Succeeded()) {
+    ReportError(DiagnosticPhase::Load, "module evaluation", result.Error());
     return quickjs::Result<void>::Failure(result.Error());
   }
   loaded = true;
@@ -387,7 +1732,7 @@ quickjs::Result<void> RuntimeImpl::LoadFile(const std::filesystem::path& path) {
         "Cannot open TSX bundle: " + path.string(),
         path.string(),
     };
-    ReportError("bundle", error);
+    ReportError(DiagnosticPhase::Load, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
   std::ostringstream buffer;
@@ -397,9 +1742,9 @@ quickjs::Result<void> RuntimeImpl::LoadFile(const std::filesystem::path& path) {
 
 quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_view filename) {
   const auto previous_root = context_.Global("__huxerui_root");
-  const auto result = context_.EvaluateModule(source, filename);
+  const auto result = context_.EvaluateModule(source, filename, MakeEvaluateOptions(options));
   if (!result.Succeeded()) {
-    ReportError("reload", result.Error());
+    ReportError(DiagnosticPhase::Reload, "module evaluation", result.Error());
     if (previous_root.Succeeded()) {
       static_cast<void>(context_.SetGlobal("__huxerui_root", previous_root.Value()));
     }
@@ -411,7 +1756,7 @@ quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_v
     if (previous_root.Succeeded()) {
       static_cast<void>(context_.SetGlobal("__huxerui_root", previous_root.Value()));
     }
-    ReportMessage("reload", "bundle evaluated but did not call mount()");
+    ReportMessage(DiagnosticPhase::Reload, "mount", "bundle evaluated but did not call mount()");
     return quickjs::Result<void>::Failure(quickjs::Error{
         quickjs::ErrorCode::Exception,
         "TSX reload bundle did not call mount()",
@@ -422,7 +1767,11 @@ quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_v
   if (previous_root.Succeeded()) {
     const auto same = next_root.Value().StrictEquals(previous_root.Value());
     if (same.Succeeded() && same.Value()) {
-      ReportMessage("reload", "bundle evaluated but did not replace the mounted root");
+      ReportMessage(
+          DiagnosticPhase::Reload,
+          "mount",
+          "bundle evaluated but did not replace the mounted root"
+      );
       return quickjs::Result<void>::Failure(quickjs::Error{
           quickjs::ErrorCode::Exception,
           "TSX reload bundle did not replace __huxerui_root; call mount() again",
@@ -447,7 +1796,7 @@ quickjs::Result<void> RuntimeImpl::ReloadFile(const std::filesystem::path& path)
         "Cannot open TSX bundle: " + path.string(),
         path.string(),
     };
-    ReportError("reload", error);
+    ReportError(DiagnosticPhase::Reload, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
   std::ostringstream buffer;
@@ -461,7 +1810,7 @@ quickjs::Result<void> RuntimeImpl::ReloadConfiguredBundle() {
         quickjs::ErrorCode::Module,
         "RuntimeOptions::bundle is empty",
     };
-    ReportError("reload", error);
+    ReportError(DiagnosticPhase::Reload, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
   return Reload(options.bundle, RevisionName(options.entry_name, revision + 1));
@@ -473,28 +1822,40 @@ quickjs::Result<void> RuntimeImpl::LoadConfiguredBundle() {
         quickjs::ErrorCode::Module,
         "RuntimeOptions::bundle is empty",
     };
-    ReportError("bundle", error);
+    ReportError(DiagnosticPhase::Load, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
   return Load(options.bundle, options.entry_name);
 }
 
 quickjs::Result<quickjs::Value> RuntimeImpl::Evaluate(std::string_view source, std::string_view filename) {
-  return context_.Evaluate(source, filename);
+  const auto result = context_.Evaluate(source, filename, MakeEvaluateOptions(options));
+  if (!result.Succeeded()) {
+    ReportError(DiagnosticPhase::Evaluation, "evaluate", result.Error());
+  }
+  return result;
 }
 
 quickjs::Result<quickjs::Value> RuntimeImpl::Invoke(std::string_view global) {
   const auto function = context_.Global(global);
   if (!function.Succeeded()) {
+    ReportError(DiagnosticPhase::Evaluation, "invoke", function.Error());
     return quickjs::Result<quickjs::Value>::Failure(function.Error());
   }
   if (!function.Value().IsFunction()) {
-    return quickjs::Result<quickjs::Value>::Failure(quickjs::Error{
+    const quickjs::Error error{
         quickjs::ErrorCode::Type,
         "Global '" + std::string(global) + "' is not a function",
-    });
+    };
+    ReportError(DiagnosticPhase::Evaluation, "invoke", error);
+    return quickjs::Result<quickjs::Value>::Failure(error);
   }
-  return function.Value().Call();
+  OperationBudgetScope budget_scope(*budget, options.operation_time_limit);
+  const auto result = function.Value().Call();
+  if (!result.Succeeded()) {
+    ReportError(DiagnosticPhase::Evaluation, "invoke " + std::string(global), result.Error());
+  }
+  return result;
 }
 
 void RuntimeImpl::RegisterFunction(
@@ -625,23 +1986,34 @@ View RuntimeImpl::RenderValue(const quickjs::Value& value) {
 
 View RuntimeImpl::RenderComponent(const quickjs::Value& node, const quickjs::Value& function) {
   const quickjs::Value props = Property(node, "props").value_or(context_.Undefined());
+  const std::string name = FunctionName(function);
+  std::weak_ptr<ComponentInstance> parent;
+  if (const auto* frame = current_frame_; frame != nullptr && frame->instance != nullptr) {
+    parent = frame->owner;
+  }
   auto* self = this;
 
-  View scope = Scope([self, function, props]() -> View {
+  View scope = Scope([self, function, props, name, parent]() -> View {
     auto candidate = std::make_shared<ComponentInstance>();
     candidate->id = self->AllocateInstanceId();
+    candidate->name = name;
+    candidate->parent = parent;
     const auto holder = AcquireStateCell<std::shared_ptr<ComponentInstance>>(std::move(candidate));
     const auto instance = holder.Get();
 
     RenderFrame frame{instance, instance.get(), 0};
-    auto* previous = self->current_frame_;
-    self->current_frame_ = &frame;
+    CurrentFrameGuard frame_guard(*self, frame);
+
+    OperationBudgetScope budget_scope(*self->budget, self->options.operation_time_limit);
     const quickjs::Value arguments[]{props};
     const auto result = function.Call(arguments);
-    self->current_frame_ = previous;
-
     if (!result.Succeeded()) {
-      self->ReportError("component render", result.Error());
+      self->ReportError(
+          DiagnosticPhase::Render,
+          "component " + name,
+          result.Error(),
+          self->ComponentPath(*instance)
+      );
       return self->ErrorView(result.Error().Message());
     }
     return self->RenderValue(result.Value());
@@ -654,9 +2026,10 @@ View RuntimeImpl::RenderComponent(const quickjs::Value& node, const quickjs::Val
 View RuntimeImpl::Root() {
   if (!loaded) {
     if (options.bundle.empty()) {
-      throw std::logic_error(
-          "huxerui::tsx::Runtime::Root() requires a loaded bundle; call Load(), LoadFile(), or LoadConfiguredBundle()"
-      );
+      const char* message =
+          "huxerui::tsx::Runtime::Root() requires a loaded bundle; call Load(), LoadFile(), or LoadConfiguredBundle()";
+      ReportMessage(DiagnosticPhase::Render, "root", message);
+      throw std::logic_error(message);
     }
     const auto result = LoadConfiguredBundle();
     if (!result.Succeeded()) {
@@ -672,15 +2045,17 @@ View RuntimeImpl::Root() {
 
     const auto root = self->context_.Global("__huxerui_root");
     if (!root.Succeeded()) {
+      self->ReportError(DiagnosticPhase::Render, "root", root.Error());
       throw std::runtime_error(
           "huxerui::tsx could not read the mounted root: " + root.Error().Message()
       );
     }
     const auto value = root.Value();
     if (value.IsUndefined() || value.IsNull()) {
-      throw std::logic_error(
-          "huxerui::tsx has no mounted root; call mount(<App />) from the entry module"
-      );
+      const char* message =
+          "huxerui::tsx has no mounted root; call mount(<App />) from the entry module";
+      self->ReportMessage(DiagnosticPhase::Render, "root", message);
+      throw std::logic_error(message);
     }
 
     View content = Scope([self, value]() -> View {
@@ -736,6 +2111,10 @@ quickjs::Context& Runtime::Context() noexcept {
 
 const quickjs::Context& Runtime::Context() const noexcept {
   return impl_->Context();
+}
+
+std::optional<Diagnostic> Runtime::LastDiagnostic() const {
+  return impl_->LastDiagnostic();
 }
 
 void Runtime::RegisterFunction(std::string name, quickjs::NativeFunction function, std::size_t arity) {

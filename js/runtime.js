@@ -64,6 +64,12 @@ export const TextField = "TextField";
 export const Chip = "Chip";
 export const IndexedPages = "IndexedPages";
 export const SelectionArea = "SelectionArea";
+export const VirtualList = "VirtualList";
+export const VirtualGrid = "VirtualGrid";
+export const Tabs = "Tabs";
+export const SegmentedButton = "SegmentedButton";
+export const NavigationPane = "NavigationPane";
+export const NavigationBar = "NavigationBar";
 
 export function mount(root) {
   globalThis.__huxerui_root = typeof root === "function" ? jsx(root, EMPTY_PROPS) : root;
@@ -128,12 +134,137 @@ export function useCallback(callback, deps) {
   return useMemo(() => callback, deps);
 }
 
+export function useFocusRef() {
+  return useMemo(() => {
+    const id = __huxerui_useFocusRequester();
+    return {
+      id,
+      requestFocus: () => __huxerui_requestFocus(id),
+    };
+  }, []);
+}
+
+export function usePopup() {
+  return useMemo(() => {
+    const id = __huxerui_usePopup();
+    return {
+      id,
+      show: (render, options = {}) => __huxerui_showPopup(id, render, options),
+      dismiss: (layer) => __huxerui_dismissPopup(id, layer),
+    };
+  }, []);
+}
+
+export function useBottomSheet() {
+  return useMemo(() => {
+    const id = __huxerui_useBottomSheet();
+    return {
+      id,
+      show: (render, options = {}) => __huxerui_showBottomSheet(id, render, options),
+      dismiss: (layer) => __huxerui_dismissBottomSheet(id, layer),
+    };
+  }, []);
+}
+
+export function useSnackBar() {
+  return useMemo(() => {
+    const id = __huxerui_useSnackBar();
+    return {
+      id,
+      show: (message, duration = 4) =>
+        __huxerui_showSnackBar(id, message, "", undefined, duration),
+      showAction: (message, action, onAction, duration = 4) =>
+        __huxerui_showSnackBar(id, message, action, onAction, duration),
+      dismiss: (layer) => __huxerui_dismissSnackBar(id, layer),
+    };
+  }, []);
+}
+
+export function useMenu() {
+  return useMemo(() => {
+    const id = __huxerui_useMenu();
+    return {
+      id,
+      show: (items) => __huxerui_showMenuAnchored(id, items),
+      showAt: (x, y, items) => __huxerui_showMenu(id, x, y, items),
+      dismiss: (layer) => __huxerui_dismissMenu(id, layer),
+    };
+  }, []);
+}
+
+export function useDialog() {
+  return useMemo(() => {
+    const id = __huxerui_useDialog();
+    return {
+      id,
+      show: (options = {}) => __huxerui_showDialog(id, options),
+      showContent: (render, options = {}) =>
+        __huxerui_showDialogContent(id, render, options),
+      dismiss: (layer) => __huxerui_dismissDialog(id, layer),
+    };
+  }, []);
+}
+
+export function useToast() {
+  return useMemo(() => {
+    const id = __huxerui_useToast();
+    return {
+      id,
+      show: (message, duration = 2) => __huxerui_showToast(id, message, duration),
+      dismiss: (layer) => __huxerui_dismissToast(id, layer),
+    };
+  }, []);
+}
+
+export function useScrollRef(initialOffset = 0) {
+  return useMemo(() => {
+    const id = __huxerui_useScrollController(initialOffset);
+    return {
+      id,
+      scrollTo: (offset) => __huxerui_scrollTo(id, offset),
+      scrollBy: (delta) => __huxerui_scrollBy(id, delta),
+      scrollToItem: (index, alignment = "start") =>
+        __huxerui_scrollToItem(id, index, alignment),
+      offset: () => __huxerui_scrollOffset(id),
+      metrics: () => __huxerui_scrollMetrics(id),
+    };
+  }, []);
+}
+
 export function useEffect(effect, deps) {
   __huxerui_useEffect(effect, deps === undefined ? null : deps);
 }
 
 export function useLayoutEffect(effect, deps) {
   __huxerui_useEffect(effect, deps === undefined ? null : deps);
+}
+
+// Timer functions are installed as host globals. These exports let bundles use
+// an explicit import without relying on ambient globals.
+export function setTimeout(callback, delay = 0) {
+  return globalThis.setTimeout(callback, delay);
+}
+
+export function clearTimeout(handle) {
+  globalThis.clearTimeout(handle);
+}
+
+export function setInterval(callback, delay = 0) {
+  return globalThis.setInterval(callback, delay);
+}
+
+export function clearInterval(handle) {
+  globalThis.clearInterval(handle);
+}
+
+if (typeof globalThis.queueMicrotask === "undefined") {
+  globalThis.queueMicrotask = (callback) => {
+    Promise.resolve().then(callback);
+  };
+}
+
+export function queueMicrotask(callback) {
+  globalThis.queueMicrotask(callback);
 }
 
 // Small console shim; the host forwards it to RuntimeOptions::on_log.
