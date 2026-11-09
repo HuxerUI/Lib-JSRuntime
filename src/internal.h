@@ -46,6 +46,7 @@ struct JsSlot {
 struct ComponentInstance {
   std::uint64_t id = 0;
   std::string name;
+  quickjs::Value function;
   std::weak_ptr<ComponentInstance> parent;
   std::vector<State<JsSlot>> states;
   std::vector<std::uint64_t> handles;
@@ -116,6 +117,7 @@ public:
   ) const;
   [[nodiscard]] View ApplyMenuAnchor(View view, const quickjs::Value& props);
   [[nodiscard]] View ApplyPopupAnchor(View view, const quickjs::Value& props);
+  [[nodiscard]] std::uint64_t NextComponentKey(const quickjs::Value& function);
 
   /// @return One component's ancestry, outermost first, joined with " > ".
   [[nodiscard]] std::string ComponentPath(const ComponentInstance& instance) const;
@@ -137,6 +139,7 @@ public:
     std::shared_ptr<ComponentInstance> owner;
     ComponentInstance* instance = nullptr;
     std::size_t next_hook = 0;
+    std::unordered_map<std::uint64_t, std::uint32_t> component_occurrences;
   };
 
   RenderFrame* CurrentFrame() const noexcept { return current_frame_; }
@@ -303,6 +306,7 @@ private:
   RenderFrame* current_frame_ = nullptr;
   std::uint64_t next_effect_dependency_ = 1;
   std::string active_component_path_;
+  std::unordered_map<std::uint64_t, std::uint32_t> root_component_occurrences_;
   std::optional<Diagnostic> last_diagnostic_;
   std::uint64_t next_timer_id_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;

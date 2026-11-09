@@ -10,6 +10,14 @@ huxerui_tsx_bundle("${HUXERUI_ESBUILD_SMOKE_BUNDLE}"
         ENTRY "${CMAKE_CURRENT_LIST_DIR}/App.tsx"
 )
 
+set(HUXERUI_ESBUILD_SHOWCASE_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/showcase.js")
+
+huxerui_tsx_bundle("${HUXERUI_ESBUILD_SHOWCASE_BUNDLE}"
+        ENTRY "${CMAKE_CURRENT_LIST_DIR}/../../examples/showcase/src/App.tsx"
+)
+
 add_custom_target(esbuild_smoke ALL
-        DEPENDS "${HUXERUI_ESBUILD_SMOKE_BUNDLE}"
+        DEPENDS
+            "${HUXERUI_ESBUILD_SMOKE_BUNDLE}"
+            "${HUXERUI_ESBUILD_SHOWCASE_BUNDLE}"
 )

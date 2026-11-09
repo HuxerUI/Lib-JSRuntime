@@ -195,6 +195,14 @@ std::string FormatDiagnostic(const Diagnostic& diagnostic) {
   return text;
 }
 
+std::uint64_t FunctionKey(const quickjs::Value& function) {
+  const auto source = function.ToString();
+  if (source.Succeeded()) {
+    return static_cast<std::uint64_t>(std::hash<std::string>{}(source.Value()));
+  }
+  return 0;
+}
+
 std::string FunctionName(const quickjs::Value& function) {
   const auto name = function.GetProperty("name");
   if (name.Succeeded()) {
@@ -663,6 +671,17 @@ std::string RuntimeImpl::ComponentPath(const ComponentInstance& instance) const 
     path += *iterator;
   }
   return path;
+}
+
+std::uint64_t RuntimeImpl::NextComponentKey(const quickjs::Value& function) {
+  const auto hash = FunctionKey(function);
+  std::uint32_t occurrence = 0;
+  if (current_frame_ != nullptr) {
+    occurrence = current_frame_->component_occurrences[hash]++;
+  } else {
+    occurrence = root_component_occurrences_[hash]++;
+  }
+  return hash ^ (static_cast<std::uint64_t>(occurrence) * 0x9E3779B97F4A7C15ULL);
 }
 
 std::string RuntimeImpl::CurrentComponentPath() const {
@@ -1991,15 +2010,27 @@ View RuntimeImpl::RenderComponent(const quickjs::Value& node, const quickjs::Val
   if (const auto* frame = current_frame_; frame != nullptr && frame->instance != nullptr) {
     parent = frame->owner;
   }
+  const auto component_key = NextComponentKey(function);
   auto* self = this;
 
   View scope = Scope([self, function, props, name, parent]() -> View {
     auto candidate = std::make_shared<ComponentInstance>();
     candidate->id = self->AllocateInstanceId();
     candidate->name = name;
+    candidate->function = function;
     candidate->parent = parent;
-    const auto holder = AcquireStateCell<std::shared_ptr<ComponentInstance>>(std::move(candidate));
-    const auto instance = holder.Get();
+    auto holder = AcquireStateCell<std::shared_ptr<ComponentInstance>>(std::move(candidate));
+    auto instance = holder.Get();
+    const auto same_function = instance->function.StrictEquals(function);
+    if (!same_function.Succeeded() || !same_function.Value()) {
+      auto replacement = std::make_shared<ComponentInstance>();
+      replacement->id = self->AllocateInstanceId();
+      replacement->name = name;
+      replacement->function = function;
+      replacement->parent = parent;
+      holder = replacement;
+      instance = std::move(replacement);
+    }
 
     RenderFrame frame{instance, instance.get(), 0};
     CurrentFrameGuard frame_guard(*self, frame);
@@ -2019,6 +2050,7 @@ View RuntimeImpl::RenderComponent(const quickjs::Value& node, const quickjs::Val
     return self->RenderValue(result.Value());
   });
 
+  scope = std::move(scope).Key(component_key);
   ApplyKey(scope, node);
   return scope;
 }
@@ -2059,6 +2091,7 @@ View RuntimeImpl::Root() {
     }
 
     View content = Scope([self, value]() -> View {
+      self->root_component_occurrences_.clear();
       return self->RenderValue(value);
     });
     return std::move(content).Key(current_revision);

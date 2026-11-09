@@ -31,6 +31,8 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 - [Limits](#limits)
 - [Repository layout](#repository-layout)
 - [Validation](#validation)
+- [Agent skill](skills/lib-jsruntime/SKILL.md)
+- [Showcase](examples/showcase)
 
 ## Capabilities
 
@@ -503,6 +505,8 @@ contained so they cannot mask the original JavaScript failure.
   for hook state.
 - The runtime owns the JavaScript context. It must outlive every `View` it produced; do not destroy
   it while the application is mounted.
+- Function components are scoped by function identity plus sibling occurrence; use explicit `key`
+  values for reordered lists.
 - Startup cost is one QuickJS context plus module evaluation. Keep heavy work off the UI thread and
   avoid large object graphs in state.
 - TODO: source-map back-mapping. Diagnostic locations currently point at generated bundle positions
@@ -526,6 +530,8 @@ contained so they cannot mask the original JavaScript failure.
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform esbuild smoke CI |
 | [`cmake/HuxerUITsx.cmake`](cmake/HuxerUITsx.cmake) | `huxerui_tsx_bundle()` and `huxerui_tsx_embed_header()` |
 | [`examples/counter`](examples/counter) | Buildable TSX counter application |
+| [`examples/showcase`](examples/showcase) | Feature-complete TSX showcase with one-command preview |
+| [`skills/lib-jsruntime`](skills/lib-jsruntime/SKILL.md) | Agent-facing usage skill and correctness checklist |
 | [`examples/preview`](examples/preview) | Live layout-preview host with file watching and `Runtime::ReloadFile()` |
 | [`tests/`](tests) | Headless composition, state, nested-scope, effect, and compiled-TSX tests |
 
@@ -541,8 +547,10 @@ the embedded `quickjs/` sources:
   render/event/effect/timer diagnostics with component stacks, timer callbacks, execution budgets,
   plus an optional end-to-end test that bundles the example TSX with the vendored esbuild, loads the emitted module
   through the runtime's module loader, and drives it with `huxerui::testing::UiTest`.
-- The TypeScript declarations type-check the example and a hook/form API sample with `tsc --strict`
-  (`jsx: react-jsx`, `jsxImportSource: @huxerui/tsx`).
+- `examples/showcase` builds and its `tsconfig.json` passes `tsc --strict` (`jsx: react-jsx`,
+  `jsxImportSource: @huxerui/tsx`).
+- CI also bundles `examples/showcase/src/App.tsx` and verifies the showcase artifact on every
+  supported host.
 - `.github/workflows/ci.yml` runs `ci/esbuild-smoke` on Linux x64/arm64, macOS x64/arm64, and
   Windows x64/arm64 to verify the vendored binary is selected and bundles TSX on each host.
 

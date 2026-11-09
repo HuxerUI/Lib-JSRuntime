@@ -32,3 +32,5 @@ jobs:
         run: cmake --build build --config Release
       - name: Verify bundle
         run: cmake "-DINPUT=build/app.js" -P ci/verify-bundle.cmake
+      - name: Verify showcase bundle
+        run: cmake "-DINPUT=build/showcase.js" -P ci/verify-showcase.cmake

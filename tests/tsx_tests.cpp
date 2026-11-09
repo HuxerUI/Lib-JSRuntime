@@ -91,6 +91,37 @@ void PreviewBundle(const char* path) {
   Check(ui.Find(testing::UiSelector::Text("HuxerUI TSX")).Exists(), "preview reload should keep the layout");
 }
 
+void ShowcaseBundle(const char* path) {
+  std::fprintf(stderr, "== showcase bundle (%s)\n", path);
+  tsx::Runtime runtime;
+  const auto loaded = runtime.LoadFile(path);
+  if (!loaded.Succeeded()) {
+    std::fprintf(stderr, "bundle error: %s\n", loaded.Error().Message().c_str());
+    std::exit(1);
+  }
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  Check(ui.Find(testing::UiSelector::Text("HuxerUI TSX")).Exists(),
+        "showcase should render its title");
+  Check(ui.Find(testing::UiSelector::Text("Overview")).Exists(),
+        "showcase should render the overview page");
+
+  ui.Find(testing::UiSelector::Text("Dialogs")).Tap();
+  ui.Pump();
+  if (const auto d = runtime.LastDiagnostic()) {
+    std::fprintf(stderr, "showcase diagnostic: %s\n", d->description.c_str());
+  }
+  Check(ui.Find(testing::UiSelector::Text("Presentation APIs")).Exists(),
+        "showcase should navigate to dialogs");
+
+  ui.Find(testing::UiSelector::Text("Forms")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Key("showcase-field")).Exists(),
+        "showcase should render the controlled TextField");
+}
+
 void Counter() {
   const char* bundle = R"JS(
     import { mount, h, Column, Text, Button, useState } from "@huxerui/tsx";
@@ -1207,6 +1238,50 @@ void FocusRef() {
         "useFocusRef().requestFocus should focus the bound TextField");
 }
 
+void ConditionalComponentIdentity() {
+  const char* bundle = R"JS(
+    import { mount, h, Button, Column, Text, useState } from "@huxerui/tsx";
+
+    function A() {
+      const [value] = useState("A-state");
+      return h(Text, null, value);
+    }
+
+    function B() {
+      const [value] = useState("B-state");
+      return h(Text, null, value);
+    }
+
+    function App() {
+      const [showA, setShowA] = useState(true);
+      return h(Column, null,
+        h(Button, { key: "switch", onClick: () => setShowA(!showA) }, "Switch"),
+        showA ? h(A) : h(B)
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  tsx::Runtime runtime(tsx::RuntimeOptions{.bundle = bundle});
+  const auto loaded = runtime.LoadConfiguredBundle();
+  Check(loaded.Succeeded(), "conditional identity bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  Check(ui.Find(testing::UiSelector::Text("A-state")).Exists(),
+        "first component should own its state");
+  ui.Find(testing::UiSelector::Key("switch")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("B-state")).Exists(),
+        "switching component type should not reuse the previous hook state");
+  ui.Find(testing::UiSelector::Key("switch")).Tap();
+  ui.Pump();
+  Check(ui.Find(testing::UiSelector::Text("A-state")).Exists(),
+        "switching back should create the first component state again");
+}
+
 void RenderDiagnostic() {
   const char* bundle = R"JS(
     import { mount, h, Column, Text } from "@huxerui/tsx";
@@ -1480,6 +1555,7 @@ int main() {
   FormProps();
   InputEvents();
   FocusRef();
+  ConditionalComponentIdentity();
   RenderDiagnostic();
   EventDiagnostic();
   EffectDiagnostic();
@@ -1493,6 +1569,9 @@ int main() {
   }
   if (const char* bundle = std::getenv("HUXERUI_TSX_PREVIEW_BUNDLE"); bundle != nullptr && *bundle != '\0') {
     PreviewBundle(bundle);
+  }
+  if (const char* bundle = std::getenv("HUXERUI_TSX_SHOWCASE_BUNDLE"); bundle != nullptr && *bundle != '\0') {
+    ShowcaseBundle(bundle);
   }
   std::fprintf(stderr, "all tsx tests passed\n");
   return 0;

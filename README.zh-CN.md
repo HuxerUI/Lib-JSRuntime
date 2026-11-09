@@ -260,6 +260,7 @@ JavaScript 错误。
 
 - QuickJS 是当前唯一引擎；不再考虑替换 JS runtime
 - **TODO**：source map 回源。当前诊断位置是生成的 bundle 行号（`app.js:line:column`），不是原始 `.tsx`
+- 函数组件按函数身份 + 同层出现顺序建立 scope；重排列表请使用显式 `key`
 - 布局热重载会重置 state；没有 state-preserving HMR
 - 事件已覆盖 click、pointer、hover、scroll、key、focus、context menu、Back、native drag、long press、multi tap
 - `VirtualList` / `VirtualGrid` 的 `renderItem` 在虚拟测量期间运行，必须是声明式回调，不能调用 hooks；需要 hook state 时在返回的 child 里放函数组件
@@ -282,6 +283,8 @@ JavaScript 错误。
 | `cmake/HuxerUITsx.cmake` | `huxerui_tsx_bundle()` / `huxerui_tsx_embed_header()` |
 | `ci/esbuild-smoke/` | 跨平台 esbuild 内置 smoke 工程 |
 | `examples/counter` | 可构建 TSX counter |
+| `examples/showcase` | 完整能力展示 + 一键 preview |
+| `skills/lib-jsruntime/SKILL.md` | 面向 AI agent 的使用 skill 与检查清单 |
 | `examples/preview` | 实时布局预览 + `Runtime::ReloadFile()` |
 | `tests/` | state、嵌套 scope、effect、layout reload、compiled TSX |
 
@@ -289,10 +292,11 @@ JavaScript 错误。
 
 - Linux 本地构建 + `ctest` 4/4 通过（tsx tests、compiled bundle、embedded QuickJS tests）
 - 测试覆盖 render/event/effect/timer 结构化诊断、组件栈、定时器、执行预算
-- `examples/counter` / `examples/preview` 构建通过
+- `examples/counter` / `examples/preview` / `examples/showcase` 构建通过
+- showcase 的 `tsconfig.json` 通过 `tsc --strict`
 - preview bundle 通过 headless `UiTest` 渲染、点击、重载检查
 - GitHub Actions matrix：Linux x64/arm64、macOS x64/arm64、Windows x64/arm64
-  按平台选择内置 esbuild，执行 TSX bundle 并验证产物
+  按平台选择内置 esbuild，执行 TSX + showcase bundle 并验证产物
 - TypeScript 声明可用 `tsc --strict` 检查；不是构建依赖
 
 macOS、Windows、Android、iOS、Web 的完整 HuxerUI 应用构建仍需各自平台工具链验证。
