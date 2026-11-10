@@ -1552,7 +1552,7 @@ void NavigationStackTest() {
 void FormComponents() {
   const char* bundle = R"JS(
     import {
-      mount, h, Column, Text, RefreshBox, Pager, SplitLayout, TopAppBar,
+      mount, h, Column, Text, RefreshBox, Pager, SplitLayout, TopAppBar, Canvas,
     } from "@huxerui/tsx";
 
     function App() {
@@ -1573,7 +1573,22 @@ void FormComponents() {
           key: "drop",
           fileDrop: {contentTypes: ["image/*"]},
           onFileDrop: () => {},
-        }, "Drop here")
+        }, "Drop here"),
+        h(Text, {
+          key: "animated",
+          opacity: {to: 0.5, duration: 100, easing: "easeOut"},
+          scale: 1.1,
+          rotation: 5,
+          offset: [2, 3],
+        }, "Animated"),
+        h(Canvas, {
+          key: "canvas",
+          frame: {width: 40, height: 20},
+          onPaint: (ctx) => {
+            ctx.fillRect(0, 0, ctx.width, ctx.height, "#ff0000");
+            ctx.circle(ctx.width / 2, ctx.height / 2, 4, "#00ff00");
+          },
+        })
       );
     }
 
@@ -1585,6 +1600,9 @@ void FormComponents() {
     Check(ui.Find(testing::UiSelector::Key("pager")).Exists(), "Pager should render");
     Check(ui.Find(testing::UiSelector::Key("split")).Exists(), "SplitLayout should render");
     Check(ui.Find(testing::UiSelector::Key("drop")).Exists(), "fileDrop should render");
+    Check(ui.Find(testing::UiSelector::Text("Animated")).Exists(),
+          "animation modifiers should render");
+    Check(ui.Find(testing::UiSelector::Key("canvas")).Exists(), "Canvas should render");
     Check(ui.Find(testing::UiSelector::Text("Components")).Exists(),
           "TopAppBar should render its title");
     Check(ui.Find(testing::UiSelector::Text("Refresh content")).Exists(),

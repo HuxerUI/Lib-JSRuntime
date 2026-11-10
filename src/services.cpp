@@ -193,6 +193,238 @@ quickjs::Value RuntimeImpl::HostApplicationLifecycle(
   return value.Succeeded() ? value.Value() : owner.Undefined();
 }
 
+namespace {
+
+std::optional<double> NumberArgument(
+    std::span<const quickjs::Value> arguments,
+    std::size_t index
+) {
+  if (index >= arguments.size()) {
+    return std::nullopt;
+  }
+  const auto value = arguments[index].ToNumber();
+  if (!value.Succeeded() || !std::isfinite(value.Value())) {
+    return std::nullopt;
+  }
+  return value.Value();
+}
+
+std::optional<Color> ColorArgument(
+    std::span<const quickjs::Value> arguments,
+    std::size_t index
+) {
+  if (index >= arguments.size()) {
+    return std::nullopt;
+  }
+  return ToColor(arguments[index]);
+}
+
+RuntimeImpl::PaintState* PaintStateArgument(
+    RuntimeImpl& runtime,
+    std::span<const quickjs::Value> arguments
+) {
+  const auto id = NumberArgument(arguments, 0);
+  if (!id || *id < 1.0) {
+    return nullptr;
+  }
+  return runtime.FindPaintState(static_cast<std::uint64_t>(*id));
+}
+
+} // namespace
+
+quickjs::Value RuntimeImpl::HostPaintFillRect(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  const auto width = NumberArgument(arguments, 3);
+  const auto height = NumberArgument(arguments, 4);
+  const auto color = ColorArgument(arguments, 5);
+  if (!state || !x || !y || !width || !height || !color) {
+    return owner.Undefined();
+  }
+  const auto radius = NumberArgument(arguments, 6).value_or(0.0);
+  state->context->DrawRect(
+      Rect{
+          static_cast<float>(*x),
+          static_cast<float>(*y),
+          static_cast<float>(*width),
+          static_cast<float>(*height),
+      },
+      *color,
+      CornerRadii(static_cast<float>(radius))
+  );
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintStrokeRect(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  const auto width = NumberArgument(arguments, 3);
+  const auto height = NumberArgument(arguments, 4);
+  const auto color = ColorArgument(arguments, 5);
+  if (!state || !x || !y || !width || !height || !color) {
+    return owner.Undefined();
+  }
+  const auto stroke = NumberArgument(arguments, 6).value_or(1.0);
+  const auto radius = NumberArgument(arguments, 7).value_or(0.0);
+  state->context->DrawBorder(
+      Rect{
+          static_cast<float>(*x),
+          static_cast<float>(*y),
+          static_cast<float>(*width),
+          static_cast<float>(*height),
+      },
+      *color,
+      StrokeStyle{.width = static_cast<float>(stroke)},
+      CornerRadii(static_cast<float>(radius))
+  );
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintLine(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x1 = NumberArgument(arguments, 1);
+  const auto y1 = NumberArgument(arguments, 2);
+  const auto x2 = NumberArgument(arguments, 3);
+  const auto y2 = NumberArgument(arguments, 4);
+  const auto color = ColorArgument(arguments, 5);
+  if (!state || !x1 || !y1 || !x2 || !y2 || !color) {
+    return owner.Undefined();
+  }
+  const auto stroke = NumberArgument(arguments, 6).value_or(1.0);
+  state->context->DrawLine(
+      Point{static_cast<float>(*x1), static_cast<float>(*y1)},
+      Point{static_cast<float>(*x2), static_cast<float>(*y2)},
+      *color,
+      StrokeStyle{.width = static_cast<float>(stroke)}
+  );
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintCircle(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  const auto radius = NumberArgument(arguments, 3);
+  const auto color = ColorArgument(arguments, 4);
+  if (!state || !x || !y || !radius || !color) {
+    return owner.Undefined();
+  }
+  state->context->DrawCircle(
+      Point{static_cast<float>(*x), static_cast<float>(*y)},
+      static_cast<float>(*radius),
+      *color
+  );
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintArc(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  const auto radius = NumberArgument(arguments, 3);
+  const auto start = NumberArgument(arguments, 4);
+  const auto sweep = NumberArgument(arguments, 5);
+  const auto color = ColorArgument(arguments, 6);
+  if (!state || !x || !y || !radius || !start || !sweep || !color) {
+    return owner.Undefined();
+  }
+  const auto stroke = NumberArgument(arguments, 7).value_or(1.0);
+  state->context->DrawArc(
+      Point{static_cast<float>(*x), static_cast<float>(*y)},
+      static_cast<float>(*radius),
+      static_cast<float>(*start),
+      static_cast<float>(*sweep),
+      *color,
+      StrokeStyle{.width = static_cast<float>(stroke)}
+  );
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintPushClipRect(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  const auto width = NumberArgument(arguments, 3);
+  const auto height = NumberArgument(arguments, 4);
+  if (!state || !x || !y || !width || !height) {
+    return owner.Undefined();
+  }
+  const auto radius = NumberArgument(arguments, 5).value_or(0.0);
+  state->context->PushClip(
+      Rect{
+          static_cast<float>(*x),
+          static_cast<float>(*y),
+          static_cast<float>(*width),
+          static_cast<float>(*height),
+      },
+      CornerRadii(static_cast<float>(radius))
+  );
+  ++state->clips;
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintPopClip(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  if (state && state->clips > 0) {
+    state->context->PopClip();
+    --state->clips;
+  }
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintPushTranslate(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  const auto x = NumberArgument(arguments, 1);
+  const auto y = NumberArgument(arguments, 2);
+  if (!state || !x || !y) {
+    return owner.Undefined();
+  }
+  Transform2D transform;
+  transform.translate_x = static_cast<float>(*x);
+  transform.translate_y = static_cast<float>(*y);
+  state->context->PushTransform(transform);
+  ++state->transforms;
+  return owner.Undefined();
+}
+
+quickjs::Value RuntimeImpl::HostPaintPopTransform(
+    quickjs::Context& owner,
+    std::span<const quickjs::Value> arguments
+) {
+  auto* state = PaintStateArgument(*this, arguments);
+  if (state && state->transforms > 0) {
+    state->context->PopTransform();
+    --state->transforms;
+  }
+  return owner.Undefined();
+}
+
 quickjs::Value RuntimeImpl::HostFetch(
     quickjs::Context& owner,
     std::span<const quickjs::Value> arguments

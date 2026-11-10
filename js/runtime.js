@@ -306,6 +306,51 @@ export function NavigationStack({ navigation, ...props }) {
   );
 }
 
+function createPaintContext(id, width, height) {
+  return {
+    id,
+    width,
+    height,
+    fillRect(x, y, w, h, color, radius = 0) {
+      __huxerui_paintFillRect(id, x, y, w, h, color, radius);
+    },
+    strokeRect(x, y, w, h, color, strokeWidth = 1, radius = 0) {
+      __huxerui_paintStrokeRect(id, x, y, w, h, color, strokeWidth, radius);
+    },
+    line(x1, y1, x2, y2, color, strokeWidth = 1) {
+      __huxerui_paintLine(id, x1, y1, x2, y2, color, strokeWidth);
+    },
+    circle(x, y, radius, color) {
+      __huxerui_paintCircle(id, x, y, radius, color);
+    },
+    arc(x, y, radius, startAngle, sweepAngle, color, strokeWidth = 1) {
+      __huxerui_paintArc(id, x, y, radius, startAngle, sweepAngle, color, strokeWidth);
+    },
+    pushClipRect(x, y, w, h, radius = 0) {
+      __huxerui_paintPushClipRect(id, x, y, w, h, radius);
+    },
+    popClip() {
+      __huxerui_paintPopClip(id);
+    },
+    pushTranslate(x, y) {
+      __huxerui_paintPushTranslate(id, x, y);
+    },
+    popTransform() {
+      __huxerui_paintPopTransform(id);
+    },
+  };
+}
+
+export function Canvas({ onPaint, ...props }) {
+  return h("Canvas", {
+    ...props,
+    onPaint: onPaint
+      ? (id, width, height) =>
+          onPaint(createPaintContext(id, width, height), { width, height })
+      : undefined,
+  });
+}
+
 export function useEffect(effect, deps) {
   __huxerui_useEffect(effect, deps === undefined ? null : deps);
 }

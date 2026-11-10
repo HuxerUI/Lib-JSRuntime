@@ -294,6 +294,7 @@ for a dev preview but not for an unbounded production hot-update service.
 | `Pager` | `Pager` | children, `selected`, `axis`, `reverse`, `dragEnabled`, `onChange`, `onSettled` |
 | `SplitLayout` | `SplitLayout` | two or more children, `axis`, `onChange(changes)` with frame/grow writeback |
 | `TopAppBar` | `TopAppBar` | `title`, `leading`, `actions`, `titleAlign` |
+| `Canvas` | `Canvas` | `onPaint(context, size)` with rect, line, circle, arc, clip, and translate commands |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | shared modifiers |
 | `ScrollView` | `ScrollView` | `axis`, `scrollRef`; multiple children become a `Column` |
@@ -337,11 +338,19 @@ Shared props map one-to-one onto HuxerUI modifiers:
 | `grow` | `Grow` (`true` or a factor) |
 | `tooltip` | `Tooltip` (string message) |
 | `semantics` | `Semantics` (role, label, value, hint, state flags, live region) |
+| `opacity` / `scale` / `rotation` | `Opacity` / `Scale` / `Rotation` (number or `{ to, duration, easing, spring, delay, iterations, repeat }`) |
+| `offset` | `Offset` (`[x, y]`, `{ x, y }`, or animated `{ to, ... }`) |
+| `transformOrigin` | Pivot `[x, y]` fractions for scale/rotation |
 | `fileDrop` | `FileDropTarget` (`true` or `{ extensions, contentTypes, allowsMultiple }`) |
 
 `fileDrop` also accepts `onFileDrop(files, event)`, `onFileDropEnter/Move/Exit(offer, event)`, and
 `onFileDropFailed(error, event)`. Dropped file references expose `name`, `size`, `contentType`,
 `canWrite`, `type`, and an optional native `path`; reading their contents stays application-owned.
+
+Animated modifiers take a target object such as
+`{ to: 1, duration: 200, easing: "easeOut", delay: 0, iterations: 1, repeat: "restart" }`; duration
+and delay are milliseconds. `spring: { stiffness, dampingRatio }` selects physical motion instead
+of the tween. `iterations: 0` repeats indefinitely.
 
 Colors accept `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(...)`, `rgba(...)`, common names,
 `0xRRGGBB`, `[r, g, b, a?]`, or `{ r, g, b, a? }`. Channels are 0–255; alpha is 0–1.
@@ -609,12 +618,13 @@ contained so they cannot mask the original JavaScript failure.
 - Images resolve local files and packaged image resource keys; raw SVG text, network URLs, and
   arbitrary programmatic vector construction are not exposed through TSX props.
 - Native routed `NavigationStack`, typed routes, page transitions, and serialized history are not
-  bridged. TSX provides the `useNavigation()`/`NavigationStack` page stack; animation and canvas
-  are not bridged yet.
+  bridged. TSX provides the `useNavigation()`/`NavigationStack` page stack; opacity/scale/rotation/
+  offset animation and Canvas drawing commands are available, but native page transitions and
+  shared-element transitions are not.
 - HUI's native `Select`, `ComboBox`, `DatePicker`, and `TimePicker` resolve built-in framework
   images and strings; the consuming application package must install the HuxerUI resources.
-- Drawer, dock, tree, window title bar, and arbitrary `Canvas`/`VectorAsset` construction are not
-  exposed as TSX tags yet.
+- Drawer, dock, tree, and window title bar are not exposed as TSX tags yet. Canvas text/images and
+  arbitrary `VectorAsset` construction are not exposed.
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` are declarative callbacks that run during
   virtual measurement; they must not call hooks. Use a function component inside the returned child
   for hook state.

@@ -133,6 +133,16 @@ public:
 
   [[nodiscard]] std::uint64_t AllocateInstanceId() noexcept { return next_instance_id++; }
 
+  struct PaintState {
+    huxerui::PaintContext* context = nullptr;
+    std::uint32_t clips = 0;
+    std::uint32_t transforms = 0;
+  };
+
+  [[nodiscard]] std::uint64_t RegisterPaintContext(huxerui::PaintContext& paint);
+  void UnregisterPaintContext(std::uint64_t id);
+  [[nodiscard]] PaintState* FindPaintState(std::uint64_t id) noexcept;
+
   // Render entry points used by the element builders.
   [[nodiscard]] View RenderValue(const quickjs::Value& value);
   void AppendChildren(const quickjs::Value& children, std::vector<View>& output);
@@ -340,6 +350,33 @@ private:
   [[nodiscard]] quickjs::Value HostApplicationLifecycle(
       quickjs::Context& owner, std::span<const quickjs::Value> arguments
   );
+  [[nodiscard]] quickjs::Value HostPaintFillRect(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintStrokeRect(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintLine(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintCircle(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintArc(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintPushClipRect(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintPopClip(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintPushTranslate(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostPaintPopTransform(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
   void ScheduleTimer(const std::shared_ptr<TimerRecord>& timer);
   void FireTimer(const std::shared_ptr<TimerRecord>& timer);
   void CancelTimers() noexcept;
@@ -354,6 +391,8 @@ private:
   std::string source_map_module_;
   std::filesystem::path source_map_base_;
   std::vector<huxerui::TaskHandle> async_tasks_;
+  std::unordered_map<std::uint64_t, PaintState> paint_contexts_;
+  std::uint64_t next_paint_context_id_ = 1;
   std::uint64_t next_timer_id_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;
   std::uint64_t next_focus_requester_id_ = 1;

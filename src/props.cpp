@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 
 #include <huxerui/file_drop.h>
 #include <huxerui/paint.h>
@@ -919,6 +921,156 @@ std::optional<FileDropOptions> FileDropOptionsFromProps(const quickjs::Value& pr
   return options;
 }
 
+std::optional<Easing> ParseEasing(std::string_view value) {
+  const auto name = Lowercase(value);
+  if (name == "linear") {
+    return Easing::Linear;
+  }
+  if (name == "easein") {
+    return Easing::EaseIn;
+  }
+  if (name == "easeout") {
+    return Easing::EaseOut;
+  }
+  if (name == "easeinout") {
+    return Easing::EaseInOut;
+  }
+  return std::nullopt;
+}
+
+struct AnimationOptions {
+  AnimationSpec spec = TweenSpec{};
+  AnimationPlayback playback{};
+};
+
+AnimationOptions AnimationOptionsFromObject(const quickjs::Value& object) {
+  AnimationOptions options;
+  if (const auto spring = Property(object, "spring");
+      spring && spring->IsObject()) {
+    SpringSpec spec;
+    if (const auto stiffness = NumberProperty(*spring, "stiffness")) {
+      spec.stiffness = static_cast<float>(*stiffness);
+    }
+    if (const auto damping = NumberProperty(*spring, "dampingRatio")) {
+      spec.damping_ratio = static_cast<float>(*damping);
+    }
+    options.spec = spec;
+  } else {
+    TweenSpec spec;
+    if (const auto duration = NumberProperty(object, "duration");
+        duration && *duration >= 0.0) {
+      spec.duration = *duration / 1000.0;
+    }
+    if (const auto easing = StringProperty(object, "easing")) {
+      if (const auto parsed = ParseEasing(*easing)) {
+        spec.easing = *parsed;
+      }
+    }
+    options.spec = spec;
+  }
+  if (const auto delay = NumberProperty(object, "delay"); delay && *delay >= 0.0) {
+    options.playback.delay = *delay / 1000.0;
+  }
+  if (const auto iterations = NumberProperty(object, "iterations")) {
+    if (*iterations <= 0.0) {
+      options.playback.iterations = std::nullopt;
+    } else {
+      options.playback.iterations =
+          static_cast<std::uint32_t>(*iterations);
+    }
+  }
+  if (const auto repeat = StringProperty(object, "repeat")) {
+    options.playback.repeat_mode =
+        Lowercase(*repeat) == "reverse" ? RepeatMode::Reverse : RepeatMode::Restart;
+  }
+  return options;
+}
+
+std::optional<std::variant<float, Animated<float>>> AnimatedFloatValue(
+    const quickjs::Value& value
+) {
+  if (value.IsNumber()) {
+    const auto number = value.ToNumber();
+    if (number.Succeeded() && std::isfinite(number.Value())) {
+      return static_cast<float>(number.Value());
+    }
+    return std::nullopt;
+  }
+  if (!value.IsObject()) {
+    return std::nullopt;
+  }
+  const auto target = NumberProperty(value, "to");
+  if (!target || !std::isfinite(*target)) {
+    return std::nullopt;
+  }
+  const auto options = AnimationOptionsFromObject(value);
+  return AnimateTo(
+      static_cast<float>(*target),
+      options.spec,
+      options.playback
+  );
+}
+
+std::optional<Point> PointValue(const quickjs::Value& value) {
+  if (!value.IsArray()) {
+    if (!value.IsObject()) {
+      return std::nullopt;
+    }
+    const auto x = NumberProperty(value, "x");
+    const auto y = NumberProperty(value, "y");
+    if (!x || !y) {
+      return std::nullopt;
+    }
+    return Point{static_cast<float>(*x), static_cast<float>(*y)};
+  }
+  const auto x = value.GetElement(0);
+  const auto y = value.GetElement(1);
+  if (!x.Succeeded() || !y.Succeeded()) {
+    return std::nullopt;
+  }
+  const auto x_number = x.Value().ToNumber();
+  const auto y_number = y.Value().ToNumber();
+  if (!x_number.Succeeded() || !y_number.Succeeded()) {
+    return std::nullopt;
+  }
+  return Point{
+      static_cast<float>(x_number.Value()),
+      static_cast<float>(y_number.Value()),
+  };
+}
+
+std::optional<std::variant<Point, Animated<Point>>> AnimatedPointValue(
+    const quickjs::Value& value
+) {
+  if (const auto point = PointValue(value)) {
+    return *point;
+  }
+  if (!value.IsObject()) {
+    return std::nullopt;
+  }
+  const auto target_value = Property(value, "to");
+  if (!target_value) {
+    return std::nullopt;
+  }
+  const auto target = PointValue(*target_value);
+  if (!target) {
+    return std::nullopt;
+  }
+  const auto options = AnimationOptionsFromObject(value);
+  return AnimateTo(*target, options.spec, options.playback);
+}
+
+std::optional<TransformOrigin> TransformOriginFromProps(const quickjs::Value& props) {
+  const auto value = Property(props, "transformOrigin");
+  if (!value) {
+    return std::nullopt;
+  }
+  if (const auto point = PointValue(*value)) {
+    return TransformOrigin{point->x, point->y};
+  }
+  return std::nullopt;
+}
+
 View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& props) {
   if (const auto spacing = NumberProperty(props, "spacing")) {
     view = AddModifier(std::move(view), Spacing(static_cast<float>(*spacing)));
@@ -1102,6 +1254,56 @@ View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& pro
   }
   if (const auto value = Property(props, "textAlign")) {
     (void)value; // Text consumes this property itself; ignore on other elements.
+  }
+  if (const auto value = Property(props, "opacity")) {
+    if (const auto parsed = AnimatedFloatValue(*value)) {
+      if (const auto* immediate = std::get_if<float>(&*parsed)) {
+        view = AddModifier(std::move(view), Opacity(*immediate));
+      } else {
+        view = AddModifier(
+            std::move(view),
+            Opacity(std::get<Animated<float>>(*parsed))
+        );
+      }
+    }
+  }
+  if (const auto value = Property(props, "offset")) {
+    if (const auto parsed = AnimatedPointValue(*value)) {
+      if (const auto* immediate = std::get_if<Point>(&*parsed)) {
+        view = AddModifier(std::move(view), Offset(*immediate));
+      } else {
+        view = AddModifier(
+            std::move(view),
+            Offset(std::get<Animated<Point>>(*parsed))
+        );
+      }
+    }
+  }
+  if (const auto value = Property(props, "scale")) {
+    if (const auto parsed = AnimatedFloatValue(*value)) {
+      const auto origin = TransformOriginFromProps(props).value_or(TransformOrigin{});
+      if (const auto* immediate = std::get_if<float>(&*parsed)) {
+        view = AddModifier(std::move(view), Scale(*immediate, origin));
+      } else {
+        view = AddModifier(
+            std::move(view),
+            Scale(std::get<Animated<float>>(*parsed), origin)
+        );
+      }
+    }
+  }
+  if (const auto value = Property(props, "rotation")) {
+    if (const auto parsed = AnimatedFloatValue(*value)) {
+      const auto origin = TransformOriginFromProps(props).value_or(TransformOrigin{});
+      if (const auto* immediate = std::get_if<float>(&*parsed)) {
+        view = AddModifier(std::move(view), Rotation(*immediate, origin));
+      } else {
+        view = AddModifier(
+            std::move(view),
+            Rotation(std::get<Animated<float>>(*parsed), origin)
+        );
+      }
+    }
   }
   if (const auto semantics = SemanticsFromProps(props)) {
     view = std::move(view).With(*semantics);

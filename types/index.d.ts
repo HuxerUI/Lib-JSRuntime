@@ -224,6 +224,32 @@ export interface FileDropError {
   message: string;
 }
 
+export interface AnimationSpec {
+  /** Duration in milliseconds; ignored when `spring` is present. */
+  duration?: number;
+  easing?: "linear" | "easeIn" | "easeOut" | "easeInOut";
+  spring?: { stiffness?: number; dampingRatio?: number };
+  /** Delay in milliseconds. */
+  delay?: number;
+  /** Iteration count; 0 repeats indefinitely. */
+  iterations?: number;
+  repeat?: "restart" | "reverse";
+}
+
+export interface AnimatedScalar extends AnimationSpec {
+  to: number;
+}
+
+export interface AnimatedPoint extends AnimationSpec {
+  to: readonly [number, number] | { x: number; y: number };
+}
+
+export type ScalarAnimation = number | AnimatedScalar;
+export type PointAnimation =
+  | readonly [number, number]
+  | { x: number; y: number }
+  | AnimatedPoint;
+
 export interface CommonProps {
   key?: Key;
   children?: Child;
@@ -288,6 +314,16 @@ export interface CommonProps {
   menuAnchor?: MenuRef;
   /** Native accessibility metadata applied to this view. */
   semantics?: SemanticsSpec;
+  /** Immediate or retained animated opacity. */
+  opacity?: ScalarAnimation;
+  /** Immediate or retained animated uniform scale. */
+  scale?: ScalarAnimation;
+  /** Immediate or retained animated rotation in degrees. */
+  rotation?: ScalarAnimation;
+  /** Immediate or retained animated translation in logical units. */
+  offset?: PointAnimation;
+  /** Pivot fractions used by scale and rotation. */
+  transformOrigin?: readonly [number, number] | { x: number; y: number };
   /** Receives external file drops; true accepts any ordinary file. */
   fileDrop?: boolean | FileDropSpec;
   onFileDrop?: (files: readonly FileReferenceInfo[], event: FileDropPoint) => void;
@@ -432,6 +468,28 @@ export interface TopAppBarProps extends CommonProps {
   leading?: Child;
   actions?: readonly Child[];
   titleAlign?: "start" | "center";
+}
+
+export interface CanvasSize {
+  width: number;
+  height: number;
+}
+
+export interface CanvasPaintContext extends CanvasSize {
+  readonly id: number;
+  fillRect(x: number, y: number, width: number, height: number, color: ColorValue, radius?: number): void;
+  strokeRect(x: number, y: number, width: number, height: number, color: ColorValue, strokeWidth?: number, radius?: number): void;
+  line(x1: number, y1: number, x2: number, y2: number, color: ColorValue, strokeWidth?: number): void;
+  circle(x: number, y: number, radius: number, color: ColorValue): void;
+  arc(x: number, y: number, radius: number, startAngle: number, sweepAngle: number, color: ColorValue, strokeWidth?: number): void;
+  pushClipRect(x: number, y: number, width: number, height: number, radius?: number): void;
+  popClip(): void;
+  pushTranslate(x: number, y: number): void;
+  popTransform(): void;
+}
+
+export interface CanvasProps extends CommonProps {
+  onPaint?: (context: CanvasPaintContext, size: CanvasSize) => void;
 }
 
 export type ScrollAlignment = "start" | "center" | "end";
@@ -611,6 +669,7 @@ export const RefreshBox: HostComponent<RefreshBoxProps>;
 export const Pager: HostComponent<PagerProps>;
 export const SplitLayout: HostComponent<SplitLayoutProps>;
 export const TopAppBar: HostComponent<TopAppBarProps>;
+export function Canvas(props: CanvasProps): VNode;
 export const Divider: HostComponent<DividerProps>;
 export const Spacer: HostComponent<CommonProps>;
 export const ScrollView: HostComponent<ScrollViewProps>;

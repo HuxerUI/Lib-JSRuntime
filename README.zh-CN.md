@@ -288,6 +288,7 @@ preview 可接受，但不适合无界的生产热更新服务。
 | `Pager` | `Pager` | children, `selected`, `axis`, `reverse`, `dragEnabled`, `onChange`, `onSettled` |
 | `SplitLayout` | `SplitLayout` | 两个及以上 children, `axis`, `onChange(changes)`（回写 frame/grow） |
 | `TopAppBar` | `TopAppBar` | `title`, `leading`, `actions`, `titleAlign` |
+| `Canvas` | `Canvas` | `onPaint(context, size)`，支持 rect、line、circle、arc、clip、translate |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | 共享修饰符 |
 | `ScrollView` | `ScrollView` | `axis`, `scrollRef`；多个 child 会变成 `Column` |
@@ -331,11 +332,19 @@ preview 可接受，但不适合无界的生产热更新服务。
 | `grow` | `Grow`（`true` 或一个系数） |
 | `tooltip` | `Tooltip`（字符串消息） |
 | `semantics` | `Semantics`（role、label、value、hint、状态标志、live region） |
+| `opacity` / `scale` / `rotation` | `Opacity` / `Scale` / `Rotation`（number 或 `{ to, duration, easing, spring, delay, iterations, repeat }`） |
+| `offset` | `Offset`（`[x, y]`、`{ x, y }` 或动画 `{ to, ... }`） |
+| `transformOrigin` | scale/rotation 的轴心 `[x, y]` 比例 |
 | `fileDrop` | `FileDropTarget`（`true` 或 `{ extensions, contentTypes, allowsMultiple }`） |
 
 `fileDrop` 同时接受 `onFileDrop(files, event)`、`onFileDropEnter/Move/Exit(offer, event)` 和
 `onFileDropFailed(error, event)`。drop 的 file reference 暴露 `name`、`size`、`contentType`、
 `canWrite`、`type` 和可选的本地 `path`；文件内容读取仍由应用自己负责。
+
+动画修饰符接受目标对象，例如
+`{ to: 1, duration: 200, easing: "easeOut", delay: 0, iterations: 1, repeat: "restart" }`；
+duration 和 delay 单位是毫秒。`spring: { stiffness, dampingRatio }` 选择物理弹簧而不是 tween；
+`iterations: 0` 表示无限循环。
 
 颜色接受 `#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb(...)`、`rgba(...)`、常见颜色名、
 `0xRRGGBB`、`[r, g, b, a?]` 或 `{ r, g, b, a? }`。通道范围 0–255；alpha 范围 0–1。
@@ -596,7 +605,10 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
   流式和二进制 payload 尚未暴露。
 - 图片解析本地文件和打包图片资源 key；TSX props 不暴露原始 SVG 文本、网络 URL 和任意程序化矢量构建。
 - 原生 routed `NavigationStack`、typed route、页面转场和可序列化 history 尚未桥接。TSX 提供
-  `useNavigation()`/`NavigationStack` 页面栈；动画和 canvas 尚未桥接。
+  `useNavigation()`/`NavigationStack` 页面栈；opacity/scale/rotation/offset 动画和 Canvas
+  绘制命令可用，但原生页面转场和 shared-element 转场不在其中。
+- Drawer、dock、tree、window title bar 尚未暴露为 TSX 标签；Canvas 文本/图片和任意
+  `VectorAsset` 构建尚未暴露。
 - HUI 原生 `Select`、`ComboBox`、`DatePicker`、`TimePicker` 会解析框架内置图片和字符串；
   消费应用需要安装 HuxerUI 资源包。
 - Drawer、dock、tree、window title bar 以及任意 `Canvas`/`VectorAsset` 构建尚未暴露为 TSX 标签。

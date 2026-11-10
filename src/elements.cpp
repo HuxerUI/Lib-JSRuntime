@@ -749,6 +749,35 @@ View BuildTopAppBar(RuntimeImpl& runtime, const quickjs::Value& props) {
   return element;
 }
 
+View BuildCanvas(RuntimeImpl& runtime, const quickjs::Value& props) {
+  const auto callback = Property(props, "onPaint");
+  if (!callback || !callback->IsFunction()) {
+    return Canvas([](PaintContext&, Size) {});
+  }
+  return Canvas(
+      [impl = &runtime, callback = *callback](PaintContext& paint, Size size) {
+        const auto id = impl->RegisterPaintContext(paint);
+        const quickjs::Value arguments[]{
+            impl->Context().Number(static_cast<double>(id)),
+            impl->Context().Number(size.width),
+            impl->Context().Number(size.height),
+        };
+        static_cast<void>(callback.Call(arguments));
+        if (auto* state = impl->FindPaintState(id)) {
+          while (state->clips > 0) {
+            paint.PopClip();
+            --state->clips;
+          }
+          while (state->transforms > 0) {
+            paint.PopTransform();
+            --state->transforms;
+          }
+        }
+        impl->UnregisterPaintContext(id);
+      }
+  );
+}
+
 View BuildDivider(RuntimeImpl& runtime, const quickjs::Value& props) {
   const auto axis = StringProperty(props, "axis").value_or("horizontal");
   return Divider(AttributeName(axis) == "vertical" ? Axis::Vertical : Axis::Horizontal);
@@ -1365,6 +1394,9 @@ View BuildElement(RuntimeImpl& runtime, std::string_view tag, const quickjs::Val
   }
   if (tag == "TopAppBar") {
     return BuildTopAppBar(runtime, props);
+  }
+  if (tag == "Canvas") {
+    return BuildCanvas(runtime, props);
   }
   if (tag == "Divider") {
     return BuildDivider(runtime, props);

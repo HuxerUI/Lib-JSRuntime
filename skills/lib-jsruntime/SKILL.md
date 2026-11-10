@@ -142,6 +142,15 @@ return <NavigationStack navigation={navigation} />;
 `NavigationStack` keeps every retained page mounted (state survives) and maps Back to `pop()`.
 This is a TSX page stack, not the native routed `NavigationStack`.
 
+## Animation and canvas
+
+- `opacity`, `scale`, and `rotation` accept a number or
+  `{ to, duration(ms), easing: "linear"|"easeIn"|"easeOut"|"easeInOut", spring: { stiffness, dampingRatio }, delay(ms), iterations, repeat: "restart"|"reverse" }`.
+- `offset` accepts `[x, y]`, `{ x, y }`, or `{ to: [x, y], ... }`; `transformOrigin` sets the
+  scale/rotation pivot fractions.
+- `<Canvas onPaint={(ctx, size) => ctx.fillRect(...)}/>` supports `fillRect`, `strokeRect`, `line`,
+  `circle`, `arc`, `pushClipRect`/`popClip`, and `pushTranslate`/`popTransform`.
+
 ## Host services
 
 - `fetch(url, options?)` returns `Promise<{ url, status, headers, body, byteLength }>`; transport,

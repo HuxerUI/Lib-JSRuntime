@@ -508,6 +508,33 @@ void RuntimeImpl::InstallHostFunctions() {
   install("__huxerui_applicationLifecycle", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     return HostApplicationLifecycle(owner, arguments);
   }, 0);
+  install("__huxerui_paintFillRect", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintFillRect(owner, arguments);
+  }, 7);
+  install("__huxerui_paintStrokeRect", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintStrokeRect(owner, arguments);
+  }, 8);
+  install("__huxerui_paintLine", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintLine(owner, arguments);
+  }, 7);
+  install("__huxerui_paintCircle", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintCircle(owner, arguments);
+  }, 5);
+  install("__huxerui_paintArc", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintArc(owner, arguments);
+  }, 8);
+  install("__huxerui_paintPushClipRect", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintPushClipRect(owner, arguments);
+  }, 6);
+  install("__huxerui_paintPopClip", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintPopClip(owner, arguments);
+  }, 1);
+  install("__huxerui_paintPushTranslate", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintPushTranslate(owner, arguments);
+  }, 3);
+  install("__huxerui_paintPopTransform", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostPaintPopTransform(owner, arguments);
+  }, 1);
   install("__huxerui_log", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     if (arguments.size() < 2) {
       return owner.Undefined();
@@ -1766,6 +1793,21 @@ quickjs::Value RuntimeImpl::HostScrollMetrics(
       object.Value().SetProperty("connected", owner.Boolean(controller.IsConnected()))
   );
   return object.Value();
+}
+
+std::uint64_t RuntimeImpl::RegisterPaintContext(huxerui::PaintContext& paint) {
+  const auto id = next_paint_context_id_++;
+  paint_contexts_[id] = PaintState{.context = &paint};
+  return id;
+}
+
+void RuntimeImpl::UnregisterPaintContext(std::uint64_t id) {
+  paint_contexts_.erase(id);
+}
+
+RuntimeImpl::PaintState* RuntimeImpl::FindPaintState(std::uint64_t id) noexcept {
+  const auto found = paint_contexts_.find(id);
+  return found == paint_contexts_.end() ? nullptr : &found->second;
 }
 
 void RuntimeImpl::CancelTimers() noexcept {
