@@ -574,6 +574,34 @@ export interface FocusRef {
 }
 export function useFocusRef(): FocusRef;
 export function useScrollRef(initialOffset?: number): ScrollRef;
+
+export type NavigationPage =
+  | VNode
+  | ((props?: Record<string, unknown>) => VNode)
+  | Child;
+
+export interface NavigationController {
+  /** Number of logical pages, including the root page. */
+  readonly depth: number;
+  readonly canPop: boolean;
+  entries(): readonly NavigationPage[];
+  current(): NavigationPage | null;
+  push(page: NavigationPage): void;
+  /** @return False when the stack is already at its root. */
+  pop(): boolean;
+  replace(page: NavigationPage): void;
+  reset(page?: NavigationPage): void;
+}
+
+export interface NavigationStackProps extends CommonProps {
+  navigation: NavigationController;
+}
+
+export function useNavigation(initialPage?: NavigationPage): NavigationController;
+
+/** Renders all retained pages with the top page selected; Back pops the stack. */
+export function NavigationStack(props: NavigationStackProps): VNode;
+
 export function useMemo<T>(factory: () => T, deps?: readonly unknown[]): T;
 export function useCallback<T extends (...args: never[]) => unknown>(callback: T, deps?: readonly unknown[]): T;
 export function useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;

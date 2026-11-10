@@ -26,6 +26,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 - [宿主元素](#宿主元素)
 - [Props 与修饰符](#props-与修饰符)
 - [Hooks](#hooks)
+- [导航](#导航)
 - [事件](#事件)
 - [模块与宿主函数](#模块与宿主函数)
 - [宿主服务](#宿主服务)
@@ -391,6 +392,45 @@ return (
 const [data, setData] = useState(() => loadInitialData());
 ```
 
+## 导航
+
+`useNavigation()` 持有一个页面栈；`NavigationStack` 渲染所有保留页面并选择栈顶页面。隐藏页面
+保持挂载，因此 push/pop 不会丢失 hooks 和 effect state。栈容器会把 Back 映射为弹出一页。
+
+```tsx
+import { Button, Column, NavigationStack, Text, useNavigation } from "@huxerui/tsx";
+
+function Home({navigation}) {
+  return (
+    <Column>
+      <Text>Home</Text>
+      <Button onClick={() => navigation.push(() => <Details navigation={navigation} />)}>
+        Details
+      </Button>
+    </Column>
+  );
+}
+
+function Details({navigation}) {
+  return (
+    <Column>
+      <Text>Details</Text>
+      <Button onClick={() => navigation.pop()}>Back</Button>
+    </Column>
+  );
+}
+
+function App() {
+  const navigation = useNavigation(() => <Home navigation={navigation} />);
+  return <NavigationStack navigation={navigation} />;
+}
+```
+
+提供 `push(page)`、`pop()`、`replace(page)`、`reset(page?)`、`depth`、`canPop`、`entries()`
+和 `current()`。这是 TSX 页面栈，不是 HuxerUI 原生 routed `NavigationStack`：typed route、
+原生页面转场和可序列化 history 不在这个 API 内。隐藏页面仍保持挂载，因此这些页面的 effect
+会继续运行。
+
 ## 事件
 
 共享事件 props 映射到 HuxerUI 类型化事件：
@@ -540,7 +580,8 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
   `fetch()` 之外的通用异步宿主 I/O 尚未暴露。`fetch()` 缓冲完整响应体并暴露 UTF-8 文本；
   流式和二进制 payload 尚未暴露。
 - 图片解析本地文件和打包图片资源 key；TSX props 不暴露原始 SVG 文本、网络 URL 和任意程序化矢量构建。
-- 路由导航、动画和 canvas 尚未桥接。
+- 原生 routed `NavigationStack`、typed route、页面转场和可序列化 history 尚未桥接。TSX 提供
+  `useNavigation()`/`NavigationStack` 页面栈；动画和 canvas 尚未桥接。
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` 是在虚拟测量期间运行的声明式
   回调；它们不能调用 hooks。需要 hook state 时，在返回的 child 里使用函数组件。
 - runtime 拥有 JavaScript context。它必须比它产生的每个 `View` 活得久；应用挂载期间不要

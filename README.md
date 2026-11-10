@@ -26,6 +26,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 - [Host elements](#host-elements)
 - [Props and modifiers](#props-and-modifiers)
 - [Hooks](#hooks)
+- [Navigation](#navigation)
 - [Events and timers](#events-and-timers)
 - [Modules and host functions](#modules-and-host-functions)
 - [Limits](#limits)
@@ -399,6 +400,46 @@ and is a bug.
 const [data, setData] = useState(() => loadInitialData());
 ```
 
+## Navigation
+
+`useNavigation()` owns a page stack; `NavigationStack` renders every retained page and selects the
+top one. Hidden pages stay mounted, so their hooks and effects survive push/pop. The stack wrapper
+handles Back by popping one page.
+
+```tsx
+import { Button, Column, NavigationStack, Text, useNavigation } from "@huxerui/tsx";
+
+function Home({navigation}) {
+  return (
+    <Column>
+      <Text>Home</Text>
+      <Button onClick={() => navigation.push(() => <Details navigation={navigation} />)}>
+        Details
+      </Button>
+    </Column>
+  );
+}
+
+function Details({navigation}) {
+  return (
+    <Column>
+      <Text>Details</Text>
+      <Button onClick={() => navigation.pop()}>Back</Button>
+    </Column>
+  );
+}
+
+function App() {
+  const navigation = useNavigation(() => <Home navigation={navigation} />);
+  return <NavigationStack navigation={navigation} />;
+}
+```
+
+`push(page)`, `pop()`, `replace(page)`, `reset(page?)`, `depth`, `canPop`, `entries()`, and
+`current()` are available. This is a TSX page stack, not HuxerUI's native routed `NavigationStack`:
+typed routes, native page transitions, and serialized history are not part of this API. Hidden
+pages remain mounted, so effects on those pages continue to run.
+
 ## Events and timers
 
 Shared event props map to HuxerUI typed events:
@@ -552,7 +593,9 @@ contained so they cannot mask the original JavaScript failure.
   body and exposes UTF-8 text; streaming and binary payloads are not exposed.
 - Images resolve local files and packaged image resource keys; raw SVG text, network URLs, and
   arbitrary programmatic vector construction are not exposed through TSX props.
-- Routed navigation, animation, and canvas are not bridged yet.
+- Native routed `NavigationStack`, typed routes, page transitions, and serialized history are not
+  bridged. TSX provides the `useNavigation()`/`NavigationStack` page stack; animation and canvas
+  are not bridged yet.
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` are declarative callbacks that run during
   virtual measurement; they must not call hooks. Use a function component inside the returned child
   for hook state.

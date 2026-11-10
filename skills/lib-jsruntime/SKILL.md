@@ -126,6 +126,17 @@ sheet.show(() => <Text>Sheet content</Text>);
 Custom presentation content factories run outside the declaring component's hook scope. They must
 not call hooks; return a function component instead.
 
+## Navigation
+
+```tsx
+const navigation = useNavigation(() => <Home navigation={navigation} />);
+return <NavigationStack navigation={navigation} />;
+```
+
+`push(page)`, `pop()`, `replace(page)`, `reset(page?)`; `depth`/`canPop`/`entries()`/`current()`.
+`NavigationStack` keeps every retained page mounted (state survives) and maps Back to `pop()`.
+This is a TSX page stack, not the native routed `NavigationStack`.
+
 ## Host services
 
 - `fetch(url, options?)` returns `Promise<{ url, status, headers, body, byteLength }>`; transport,

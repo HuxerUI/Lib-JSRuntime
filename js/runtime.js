@@ -231,6 +231,73 @@ export function useScrollRef(initialOffset = 0) {
   }, []);
 }
 
+export function useNavigation(initialPage) {
+  const [pages, setPages] = useState(() => (initialPage ? [initialPage] : []));
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  return useMemo(() => ({
+    get depth() {
+      return pagesRef.current.length;
+    },
+    get canPop() {
+      return pagesRef.current.length > 1;
+    },
+    entries() {
+      return pagesRef.current;
+    },
+    current() {
+      return pagesRef.current.length > 0
+        ? pagesRef.current[pagesRef.current.length - 1]
+        : null;
+    },
+    push(page) {
+      setPages((current) => [...current, page]);
+    },
+    pop() {
+      if (pagesRef.current.length <= 1) {
+        return false;
+      }
+      setPages((current) => (current.length > 1 ? current.slice(0, -1) : current));
+      return true;
+    },
+    replace(page) {
+      setPages((current) => (
+        current.length > 0 ? [...current.slice(0, -1), page] : [page]
+      ));
+    },
+    reset(page) {
+      setPages(page ? [page] : []);
+    },
+  }), []);
+}
+
+function renderNavigationPage(page) {
+  return typeof page === "function" ? h(page) : page;
+}
+
+export function NavigationStack({ navigation, ...props }) {
+  const pages = navigation.entries();
+  if (pages.length === 0) {
+    return null;
+  }
+  const rendered = pages.map((page, index) => {
+    const node = renderNavigationPage(page);
+    if (node === null || node === undefined || typeof node !== "object" || Array.isArray(node)) {
+      return node;
+    }
+    if (node.key !== undefined && node.key !== null) {
+      return node;
+    }
+    return { ...node, key: "page-" + index };
+  });
+  if (rendered.length === 0) {
+    return null;
+  }
+  return h(Column, { ...props, onBack: () => navigation.pop() },
+    h(IndexedPages, { selected: rendered.length - 1 }, rendered)
+  );
+}
+
 export function useEffect(effect, deps) {
   __huxerui_useEffect(effect, deps === undefined ? null : deps);
 }

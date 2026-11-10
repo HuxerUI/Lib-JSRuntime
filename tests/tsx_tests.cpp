@@ -1500,6 +1500,55 @@ void ServiceBridge() {
   });
 }
 
+void NavigationStackTest() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Text, Button, useState,
+      useNavigation, NavigationStack,
+    } from "@huxerui/tsx";
+
+    function Home({navigation}) {
+      const [count, setCount] = useState(0);
+      return h(Column, null,
+        h(Text, {key: "home"}, "Home " + count),
+        h(Button, {key: "increment", onClick: () => setCount(count + 1)}, "Increment"),
+        h(Button, {
+          key: "push",
+          onClick: () => navigation.push(() => h(Detail, {navigation})),
+        }, "Details")
+      );
+    }
+
+    function Detail({navigation}) {
+      return h(Column, null,
+        h(Text, {key: "detail"}, "Detail"),
+        h(Button, {key: "pop", onClick: () => navigation.pop()}, "Back")
+      );
+    }
+
+    function App() {
+      const navigation = useNavigation(() => h(Home, {navigation}));
+      return h(NavigationStack, {navigation});
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("navigation stack", bundle, [](testing::UiTest& ui, tsx::Runtime&) {
+    Check(ui.Find(testing::UiSelector::Text("Home 0")).Exists(),
+          "navigation stack should mount its root page");
+    ui.Find(testing::UiSelector::Key("increment")).Tap();
+    Check(ui.Find(testing::UiSelector::Text("Home 1")).Exists(),
+          "root page state should update before navigation");
+    ui.Find(testing::UiSelector::Key("push")).Tap();
+    Check(ui.Find(testing::UiSelector::Text("Detail")).Exists(),
+          "push should add and select a page");
+    ui.Find(testing::UiSelector::Key("pop")).Tap();
+    Check(ui.Find(testing::UiSelector::Text("Home 1")).Exists(),
+          "pop should return to the retained root page with its state");
+  });
+}
+
 void FetchRejection() {
   const char* bundle = R"JS(
     import {
