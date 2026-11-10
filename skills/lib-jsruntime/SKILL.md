@@ -23,6 +23,7 @@ Use this skill when authoring or debugging a HuxerUI interface in TSX.
 | `js/runtime.js` | embedded `@huxerui/tsx` JS module |
 | `types/index.d.ts` | TSX authoring surface |
 | `src/elements.cpp` | host tags -> HUX views |
+| `src/source_map.cpp` | inline source-map diagnostic remapping |
 | `src/events.cpp` | native events -> JS event objects |
 | `examples/showcase/src/App.tsx` | complete feature showcase |
 | `examples/preview` | one-command live preview |
@@ -127,6 +128,8 @@ not call hooks; return a function component instead.
 - One-command preview: `cmake --build <build> --target tsx_preview`.
 - Direct esbuild needs `--jsx=automatic --jsx-import-source=@huxerui/tsx`.
 - Externalize `@huxerui/tsx` and `@huxerui/tsx/jsx-runtime` when the runtime loader will serve them.
+- `huxerui_tsx_bundle` adds `--sourcemap=inline --sources-content=false`; direct esbuild should do
+  the same so diagnostics resolve to original `.tsx` locations.
 - `tsc` is optional type checking only; esbuild erases types without checking.
 
 ## Debug checklist
@@ -139,7 +142,9 @@ not call hooks; return a function component instead.
 6. Function components are scoped by function identity + sibling occurrence. Give reordered lists
    explicit `key` values.
 7. A failed reload keeps the previous tree; a successful reload resets state.
-8. Source-map locations are still generated `app.js` positions; original `.tsx` line numbers are TODO.
+8. With an inline source map, `Diagnostic::filename`/`line`/`column` and bundle stack frames point
+   at the original `.tsx`; `generated_*` keeps the bundle location. Without a map, locations are
+   generated `app.js` positions.
 
 ## Validation
 

@@ -26,7 +26,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 - [Host elements](#host-elements)
 - [Props and modifiers](#props-and-modifiers)
 - [Hooks](#hooks)
-- [Events](#events)
+- [Events and timers](#events-and-timers)
 - [Modules and host functions](#modules-and-host-functions)
 - [Limits](#limits)
 - [Repository layout](#repository-layout)
@@ -87,6 +87,7 @@ third_party/esbuild/linux-x64/esbuild src/App.tsx \
   --bundle --format=esm --platform=neutral --jsx=automatic \
   --jsx-import-source=@huxerui/tsx --target=es2020 \
   --external:@huxerui/tsx --external:@huxerui/tsx/jsx-runtime \
+  --sourcemap=inline --sources-content=false \
   --outfile=build/app.js
 ```
 
@@ -107,7 +108,13 @@ automatic JSX runtime:
 --bundle --format=esm --platform=neutral --jsx=automatic
 --jsx-import-source=@huxerui/tsx
 --external:@huxerui/tsx --external:@huxerui/tsx/jsx-runtime
+--sourcemap=inline --sources-content=false
 ```
+
+`--sourcemap=inline` embeds a source map in the bundle; the runtime uses it to report diagnostics
+against the original `.tsx` file. `--sources-content=false` keeps the embedded map small by
+omitting source text. Bundles without an inline map remain supported and report generated
+positions.
 
 Recommended `tsconfig.json`:
 
@@ -271,11 +278,11 @@ for a dev preview but not for an unbounded production hot-update service.
 | Tag | C++ view | Notable props |
 | --- | --- | --- |
 | `Column`, `Row`, `Flow`, `Stack` | same layout | children plus shared modifiers |
-| `Theme` | `MaterialTheme` | wraps one child (multiple children become a `Column`) |
-| `Text` | `Text` | `value`, `role`, `fontSize`, `fontWeight`, `fontFamily`, `italic`, `color`, `decoration`, `textAlign` |
-| `Button` | `Button` | `label`, or text children; `onClick` |
-| `IconButton` | `IconButton` | `src`, `label` |
-| `Image` | `Image` | `src` (local file), `fit`, `tint` |
+| `Theme` | `MaterialTheme` / `MaterialDarkTheme` / `FlatTheme` / `FlatDarkTheme` | `variant` (`material`, `materialDark`, `flat`, `flatDark`) or `dark`; wraps one child (multiple children become a `Column`) |
+| `Text` | `Text` | `value` (string or `{ resource: "domain:key" }`), `role`, `fontSize`, `fontWeight`, `fontFamily`, `italic`, `color`, `decoration`, `textAlign` |
+| `Button` | `Button` | `label` (string or `{ resource }`), or text children; `onClick` |
+| `IconButton` | `IconButton` | `src` (local file or `{ resource }`), `label` |
+| `Image` | `Image` | `src` (local file, `{ file }`, or `{ resource: "domain:key" }`), `fit`, `tint` |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | shared modifiers |
 | `ScrollView` | `ScrollView` | `axis`, `scrollRef`; multiple children become a `Column` |
@@ -290,10 +297,13 @@ for a dev preview but not for an unbounded production hot-update service.
 | `Tabs` | `Tabs` | `labels`, `selected`, `onChange(number)` |
 | `SegmentedButton` | `SegmentedButton` | `labels`, `selected`, `onChange(number)` |
 | `NavigationPane` | `NavigationPane` | `labels`, `selected`, `expanded`, `onChange(number)` |
-| `NavigationBar` | `NavigationBar` | `items: { label, src, selectedSrc?, disabled? }[]`, `selected`, `onChange(number)` |
+| `NavigationBar` | `NavigationBar` | `items: { label, src, selectedSrc?, disabled? }[]` (`src` accepts local files or `{ resource }`), `selected`, `onChange(number)` |
 | `IndexedPages` | `IndexedPages` | `selected` page index |
 
 Text children are concatenated in order: `<Text>Count: {count}</Text>` produces `"Count: 3"`.
+`Text`, `Button`, and navigation labels also accept `{ resource: "domain:key" }`; the mounted view
+resolves the packaged string in its effective `Locale`. Image sources accept a local path, `{ file }`,
+or `{ resource }`; packaged raster and compiled-vector image keys are resolved by HuxerUI at mount.
 
 ## Props and modifiers
 
@@ -470,7 +480,11 @@ tsx::RuntimeOptions options{
 ```
 
 `Diagnostic` carries `phase`, `code`, `operation`, `message`, `filename`, `line`, `column`,
-`stack`, `component_stack`, and `description`. The description is formatted as
+`generated_filename`, `generated_line`, `generated_column`, `stack`, `component_stack`, and
+`description`. When the bundle embeds an inline source map, `filename`, `line`, and `column`
+point at the original `.tsx` source, `stack` frames from the bundle are remapped, and the
+`generated_*` fields preserve the bundle location. Without a source map, the mapped fields equal
+the generated fields. The description is formatted as
 `phase [ErrorCode]: operation: message (file:line:column)` followed by the JavaScript stack and
 `component stack: App > Child`. `Runtime::LastDiagnostic()` returns the most recent one, which is
 useful for tests and error overlays.
@@ -497,8 +511,8 @@ contained so they cannot mask the original JavaScript failure.
   multi tap, plus toggle, slider, chip, and text-field changes.
 - Timers cover `setTimeout`, `setInterval`, and `queueMicrotask`; `requestAnimationFrame`, `fetch`,
   and general async host I/O are not exposed yet.
-- Images resolve local files through `ImageAsset::FromFile`; packaged resource IDs, network URLs,
-  and vector assets are not exposed.
+- Images resolve local files and packaged image resource keys; raw SVG text, network URLs, and
+  arbitrary programmatic vector construction are not exposed through TSX props.
 - Routed navigation, animation, and canvas are not bridged yet.
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` are declarative callbacks that run during
   virtual measurement; they must not call hooks. Use a function component inside the returned child
@@ -509,8 +523,8 @@ contained so they cannot mask the original JavaScript failure.
   values for reordered lists.
 - Startup cost is one QuickJS context plus module evaluation. Keep heavy work off the UI thread and
   avoid large object graphs in state.
-- TODO: source-map back-mapping. Diagnostic locations currently point at generated bundle positions
-  (`app.js:line:column`), not the original `.tsx` file.
+- Source-map resolution reads inline maps only. External `.map` files and indexed maps (`sections`)
+  are not loaded; bundle with `--sourcemap=inline` to map diagnostics.
 
 ## Repository layout
 
@@ -520,6 +534,7 @@ contained so they cannot mask the original JavaScript failure.
 | [`src/runtime.cpp`](src/runtime.cpp) | Engine ownership, module loader, hooks, VNode traversal, error reporting |
 | [`src/elements.cpp`](src/elements.cpp) | Host-tag to HuxerUI `View` builders and event forwarding |
 | [`src/props.cpp`](src/props.cpp) | Prop parsing, colors, modifiers, keys |
+| [`src/source_map.cpp`](src/source_map.cpp) | Inline source-map parsing and diagnostic/stack back-mapping |
 | [`js/runtime.js`](js/runtime.js) | Embedded `@huxerui/tsx` module: JSX runtimes, hooks, host tags, `mount()` |
 | [`quickjs/`](quickjs) | Embedded Lib-QuickJS wrapper and quickjs-ng `v0.18.0` engine sources |
 | [`quickjs/tests`](quickjs/tests) | Embedded engine contract tests |
@@ -527,13 +542,13 @@ contained so they cannot mask the original JavaScript failure.
 | [`tools/huxerui-tsx.mjs`](tools/huxerui-tsx.mjs) | Optional Node wrapper around esbuild; falls back to the vendored binary |
 | [`tools/huxerui-tsx-dev.sh`](tools/huxerui-tsx-dev.sh) | POSIX one-command esbuild watcher + app launcher |
 | [`third_party/esbuild`](third_party/esbuild) | Pinned standalone esbuild 0.25.0 binaries for all supported hosts, plus checksums |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform esbuild smoke CI |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform esbuild smoke plus native build/test CI |
 | [`cmake/HuxerUITsx.cmake`](cmake/HuxerUITsx.cmake) | `huxerui_tsx_bundle()` and `huxerui_tsx_embed_header()` |
 | [`examples/counter`](examples/counter) | Buildable TSX counter application |
 | [`examples/showcase`](examples/showcase) | Feature-complete TSX showcase with one-command preview |
 | [`skills/lib-jsruntime`](skills/lib-jsruntime/SKILL.md) | Agent-facing usage skill and correctness checklist |
 | [`examples/preview`](examples/preview) | Live layout-preview host with file watching and `Runtime::ReloadFile()` |
-| [`tests/`](tests) | Headless composition, state, nested-scope, effect, and compiled-TSX tests |
+| [`tests/`](tests) | Headless composition, state, nested-scope, effect, compiled-TSX, and source-map tests |
 
 ## Validation
 
@@ -545,13 +560,20 @@ the embedded `quickjs/` sources:
   preservation, effect run/cleanup, lazy initializers, memo/ref behavior, conditional and array
   children, layout hot reload (new layout, fresh state, failed-reload rollback), structured
   render/event/effect/timer diagnostics with component stacks, timer callbacks, execution budgets,
-  plus an optional end-to-end test that bundles the example TSX with the vendored esbuild, loads the emitted module
-  through the runtime's module loader, and drives it with `huxerui::testing::UiTest`.
+  plus end-to-end tests that bundle TSX with the vendored esbuild, load the emitted modules through
+  the runtime, and drive them with `huxerui::testing::UiTest`. A compiled fixture also verifies
+  source-map back-mapping of the primary location, stack frames, and formatted description.
 - `examples/showcase` builds and its `tsconfig.json` passes `tsc --strict` (`jsx: react-jsx`,
   `jsxImportSource: @huxerui/tsx`).
 - CI also bundles `examples/showcase/src/App.tsx` and verifies the showcase artifact on every
   supported host.
 - `.github/workflows/ci.yml` runs `ci/esbuild-smoke` on Linux x64/arm64, macOS x64/arm64, and
-  Windows x64/arm64 to verify the vendored binary is selected and bundles TSX on each host.
+  Windows x64/arm64 to verify the vendored binary is selected and bundles TSX on each host. It also
+  configures, builds, and runs the test suite against a pinned HuxerUI source checkout on Ubuntu,
+  Windows, and macOS.
 
-Android, iOS, macOS, Windows, and Web builds were not exercised here.
+Local validation was Linux-only; Android, iOS, and Web builds are not exercised here.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

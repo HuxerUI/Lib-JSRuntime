@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <huxerui/resource.h>
@@ -33,6 +34,54 @@ std::string AttributeName(std::string_view text) {
     result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
   }
   return result;
+}
+
+/// Parses a packaged resource identity from either `"domain:key"` or
+/// `{ domain, key }`. Generated HuxerUI keys use the `domain:key` form.
+std::optional<std::pair<std::string, std::string>> ParseResourceId(const quickjs::Value& value) {
+  if (!value.IsObject()) {
+    return std::nullopt;
+  }
+  if (const auto resource = StringProperty(value, "resource")) {
+    const auto separator = resource->find(':');
+    if (separator == std::string::npos || separator == 0 || separator + 1 >= resource->size()) {
+      return std::nullopt;
+    }
+    return std::make_pair(resource->substr(0, separator), resource->substr(separator + 1));
+  }
+  const auto domain = StringProperty(value, "domain");
+  const auto key = StringProperty(value, "key");
+  if (!domain || !key || domain->empty() || key->empty()) {
+    return std::nullopt;
+  }
+  return std::make_pair(*domain, *key);
+}
+
+/// Accepts literal text or a packaged string resource. Resource values stay
+/// deferred so the mounted Text resolves them in its effective Locale.
+std::optional<StringVariant> StringVariantFromValue(const quickjs::Value& value) {
+  if (value.IsString()) {
+    const auto text = value.ToString();
+    if (text.Succeeded()) {
+      return StringVariant(text.Value());
+    }
+    return std::nullopt;
+  }
+  if (const auto resource = ParseResourceId(value)) {
+    return StringVariant(StringResource(resource->first, resource->second));
+  }
+  return std::nullopt;
+}
+
+std::optional<StringVariant> StringVariantProperty(
+    const quickjs::Value& props,
+    std::string_view name
+) {
+  const auto value = Property(props, name);
+  if (!value) {
+    return std::nullopt;
+  }
+  return StringVariantFromValue(*value);
 }
 
 std::optional<TextRole> ParseRole(const quickjs::Value& props) {
@@ -204,12 +253,12 @@ View BuildLayout(RuntimeImpl& runtime, const quickjs::Value& props, int kind) {
 }
 
 View BuildText(RuntimeImpl& runtime, const quickjs::Value& props) {
-  std::string text = ChildText(props);
-  if (const auto value = StringProperty(props, "value")) {
-    text = *value;
+  StringVariant text(ChildText(props));
+  if (auto localized = StringVariantProperty(props, "value")) {
+    text = std::move(*localized);
   }
   const auto role = ParseRole(props).value_or(TextRole::Body);
-  Text element(text, role);
+  Text element(std::move(text), role);
   if (const auto style = TextStyleFromProps(props)) {
     element = std::move(element).Style(*style);
   }
@@ -222,20 +271,47 @@ View BuildText(RuntimeImpl& runtime, const quickjs::Value& props) {
 }
 
 View BuildButton(RuntimeImpl& runtime, const quickjs::Value& props) {
-  std::string label = StringProperty(props, "label").value_or(ChildText(props));
-  return Button(label);
+  StringVariant label(ChildText(props));
+  if (auto localized = StringVariantProperty(props, "label")) {
+    label = std::move(*localized);
+  }
+  return Button(std::move(label));
+}
+
+std::optional<ImageVariant> ImageFromValue(const quickjs::Value& source) {
+  if (source.IsString()) {
+    const auto path = source.ToString();
+    if (!path.Succeeded()) {
+      return std::nullopt;
+    }
+    try {
+      return ImageAsset::FromFile(path.Value());
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+  if (!source.IsObject()) {
+    return std::nullopt;
+  }
+  if (const auto file = StringProperty(source, "file")) {
+    try {
+      return ImageAsset::FromFile(*file);
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+  if (const auto resource = ParseResourceId(source)) {
+    return ImageResource(resource->first, resource->second);
+  }
+  return std::nullopt;
 }
 
 std::optional<ImageVariant> ImageFromProps(const quickjs::Value& props) {
-  const auto source = StringProperty(props, "src");
+  const auto source = Property(props, "src");
   if (!source) {
     return std::nullopt;
   }
-  try {
-    return ImageAsset::FromFile(*source);
-  } catch (...) {
-    return std::nullopt;
-  }
+  return ImageFromValue(*source);
 }
 
 View BuildIconButton(RuntimeImpl& runtime, const quickjs::Value& props) {
@@ -243,7 +319,11 @@ View BuildIconButton(RuntimeImpl& runtime, const quickjs::Value& props) {
   if (!image) {
     return Text("[IconButton: missing src]");
   }
-  return IconButton(*image, StringProperty(props, "label").value_or(""));
+  StringVariant label("");
+  if (auto localized = StringVariantProperty(props, "label")) {
+    label = std::move(*localized);
+  }
+  return IconButton(*image, std::move(label));
 }
 
 View BuildImage(RuntimeImpl& runtime, const quickjs::Value& props) {
@@ -726,24 +806,23 @@ View BuildNavigationBar(RuntimeImpl& runtime, const quickjs::Value& props) {
     if (!value.Succeeded() || !value.Value().IsObject()) {
       continue;
     }
-    const auto label = StringProperty(value.Value(), "label");
-    const auto source = StringProperty(value.Value(), "src");
-    if (!label || label->empty() || !source || source->empty()) {
+    const auto label_value = Property(value.Value(), "label");
+    const auto source_value = Property(value.Value(), "src");
+    const auto label = label_value ? StringVariantFromValue(*label_value) : std::nullopt;
+    const auto source = source_value ? ImageFromValue(*source_value) : std::nullopt;
+    if (!label || !source) {
       continue;
     }
-    try {
-      NavigationItem item(ImageAsset::FromFile(*source), *label);
-      if (const auto selected = StringProperty(value.Value(), "selectedSrc");
-          selected && !selected->empty()) {
-        item = std::move(item).SelectedIcon(ImageAsset::FromFile(*selected));
+    NavigationItem item(*source, std::move(*label));
+    if (const auto selected_value = Property(value.Value(), "selectedSrc")) {
+      if (auto selected = ImageFromValue(*selected_value)) {
+        item = std::move(item).SelectedIcon(*selected);
       }
-      if (const auto disabled = BoolProperty(value.Value(), "disabled"); disabled && *disabled) {
-        item = std::move(item).Enabled(false);
-      }
-      items.push_back(std::move(item));
-    } catch (...) {
-      return Text("NavigationBar could not load icon: " + *source);
     }
+    if (const auto disabled = BoolProperty(value.Value(), "disabled"); disabled && *disabled) {
+      item = std::move(item).Enabled(false);
+    }
+    items.push_back(std::move(item));
   }
   if (items.empty()) {
     return Text("NavigationBar requires at least one valid item");
@@ -835,6 +914,22 @@ View BuildTheme(RuntimeImpl& runtime, const quickjs::Value& props) {
       Property(props, "children").value_or(runtime.Context().Undefined())
   );
   View content = children.size() == 1 ? children.front() : Column(std::move(children));
+  std::string variant = "material";
+  if (const auto value = StringProperty(props, "variant")) {
+    variant = Lowercase(*value);
+  } else if (const auto value = StringProperty(props, "theme")) {
+    variant = Lowercase(*value);
+  }
+  const bool dark = BoolProperty(props, "dark").value_or(false);
+  if (variant == "flat" || variant == "flatdark") {
+    if (variant == "flatdark" || dark) {
+      return FlatDarkTheme(content);
+    }
+    return FlatTheme(content);
+  }
+  if (variant == "materialdark" || dark) {
+    return MaterialDarkTheme(content);
+  }
   return MaterialTheme(content);
 }
 

@@ -174,6 +174,8 @@ function(huxerui_tsx_bundle output)
             --log-level=warning
             "--external:@huxerui/tsx"
             "--external:@huxerui/tsx/jsx-runtime"
+            --sourcemap=inline
+            --sources-content=false
     )
     list(APPEND HUXERUI_TSX_COMMAND ${HUXERUI_TSX_BUNDLE_ARGS})
 

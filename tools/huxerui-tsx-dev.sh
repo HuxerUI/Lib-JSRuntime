@@ -92,6 +92,8 @@ bundle() {
         --log-level=warning \
         "--external:@huxerui/tsx" \
         "--external:@huxerui/tsx/jsx-runtime" \
+        --sourcemap=inline \
+        --sources-content=false \
         "$@"
 }
 
@@ -111,6 +113,8 @@ bundle || exit $?
     --log-level=warning \
     "--external:@huxerui/tsx" \
     "--external:@huxerui/tsx/jsx-runtime" \
+    --sourcemap=inline \
+    --sources-content=false \
     --watch=forever </dev/null &
 watcher=$!
 

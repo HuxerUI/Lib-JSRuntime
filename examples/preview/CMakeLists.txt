@@ -79,6 +79,8 @@ add_custom_target(tsx_watch
             --log-level=warning
             "--external:@huxerui/tsx"
             "--external:@huxerui/tsx/jsx-runtime"
+            --sourcemap=inline
+            --sources-content=false
             --watch=forever
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Watching App.tsx with esbuild (Ctrl+C to stop)"

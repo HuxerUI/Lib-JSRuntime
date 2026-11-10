@@ -62,9 +62,19 @@ struct Diagnostic {
   quickjs::ErrorCode code = quickjs::ErrorCode::Exception;
   std::string operation;
   std::string message;
+  /// Original source location when the loaded bundle embedded an inline source
+  /// map and the location is covered by it; the generated bundle location
+  /// otherwise.
   std::string filename;
   int line = 0;
   int column = 0;
+  /// Generated bundle location before source-map resolution. Populated when
+  /// the engine reported a location, so tooling can correlate both views.
+  std::string generated_filename;
+  int generated_line = 0;
+  int generated_column = 0;
+  /// JavaScript stack. Frames from the loaded bundle are rewritten to their
+  /// original source locations when a source map is available.
   std::string stack;
   std::string component_stack;
   std::string description;
@@ -78,7 +88,8 @@ struct RuntimeOptions {
   std::string bundle;
   /// Optional directory used to resolve absolute module names when the bundle
   /// is not self-contained. Relative names resolved by QuickJS are joined to
-  /// this directory.
+  /// this directory. It also resolves relative sources from an embedded
+  /// source map; file-backed bundles use the bundle's own directory.
   std::filesystem::path module_root;
   /// QuickJS heap limit in bytes; zero keeps the engine default.
   std::size_t memory_limit_bytes = 0;

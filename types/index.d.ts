@@ -234,8 +234,34 @@ export interface CommonProps {
 
 export interface LayoutProps extends CommonProps {}
 
+export interface LocalizedTextSpec {
+  /** Packaged resource in "domain:key" form. */
+  resource?: string;
+  domain?: string;
+  key?: string;
+}
+
+export type TextValue = string | number | LocalizedTextSpec;
+
+export interface ImageSourceSpec {
+  /** Local raster file; equivalent to passing the path as a string. */
+  file?: string;
+  /** Packaged image resource in "domain:key" form. */
+  resource?: string;
+  domain?: string;
+  key?: string;
+}
+
+export type ImageSource = string | ImageSourceSpec;
+
+export type ThemeVariant =
+  | "material"
+  | "materialDark"
+  | "flat"
+  | "flatDark";
+
 export interface TextProps extends CommonProps {
-  value?: string | number;
+  value?: TextValue;
   role?: "body" | "label" | "title";
   fontSize?: number;
   fontWeight?: number | "thin" | "extraLight" | "light" | "regular" | "medium" | "semiBold" | "bold" | "extraBold" | "black";
@@ -247,16 +273,16 @@ export interface TextProps extends CommonProps {
 }
 
 export interface ButtonProps extends CommonProps {
-  label?: string;
+  label?: TextValue;
 }
 
 export interface IconButtonProps extends CommonProps {
-  src: string;
-  label: string;
+  src: ImageSource;
+  label: TextValue;
 }
 
 export interface ImageProps extends CommonProps {
-  src: string;
+  src: ImageSource;
   fit?: "none" | "contain" | "cover" | "fill" | "scaleDown";
   tint?: ColorValue;
 }
@@ -390,9 +416,9 @@ export interface TabsProps extends CommonProps {
 }
 
 export interface NavigationBarItem {
-  label: string;
-  src: string;
-  selectedSrc?: string;
+  label: TextValue;
+  src: ImageSource;
+  selectedSrc?: ImageSource;
   disabled?: boolean;
 }
 
@@ -415,7 +441,13 @@ export interface SegmentedButtonProps extends CommonProps {
   onChange?: (index: number) => void;
 }
 
-export interface ThemeProps extends CommonProps {}
+export interface ThemeProps extends CommonProps {
+  variant?: ThemeVariant;
+  /** Alias for `variant`. */
+  theme?: ThemeVariant;
+  /** Selects the dark variant of `variant`. */
+  dark?: boolean;
+}
 
 export const Fragment: Component<{ children?: Child }>;
 

@@ -3,6 +3,15 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Official HuxerUI 0.4.0 (main branch commit; no v0.4.0 tag yet).
+  HUXERUI_REPOSITORY: HuxerUI/HuxerUI
+  HUXERUI_REVISION: 36f93958ea368c38d9361cc7dc2c2cbe3a4b5892
 
 jobs:
   esbuild:
@@ -34,3 +43,49 @@ jobs:
         run: cmake "-DINPUT=build/app.js" -P ci/verify-bundle.cmake
       - name: Verify showcase bundle
         run: cmake "-DINPUT=build/showcase.js" -P ci/verify-showcase.cmake
+
+  native:
+    name: native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out pinned HuxerUI SDK
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HUXERUI_REPOSITORY }}
+          ref: ${{ env.HUXERUI_REVISION }}
+          path: .cache/HuxerUI
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libepoxy-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libsoup-3.0-dev
+      - name: Configure library and tests
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI"
+          -DHUXERUI_BUILD_TESTING_LIBRARY=ON
+          -DHUXERUI_TSX_BUILD_TESTS=ON
+      - name: Build library and tests
+        run: cmake --build build --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Configure counter example
+        if: runner.os == 'Linux'
+        run: >
+          cmake -S examples/counter -B build-counter
+          -DCMAKE_BUILD_TYPE=Release
+          -DHUXERUI_HOME="${{ github.workspace }}/.cache/HuxerUI"
+      - name: Build counter example
+        if: runner.os == 'Linux'
+        run: cmake --build build-counter --config Release --parallel 2

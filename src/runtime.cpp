@@ -552,8 +552,30 @@ void RuntimeImpl::ReportError(
   diagnostic.filename = error.Filename();
   diagnostic.line = error.Line();
   diagnostic.column = error.Column();
+  diagnostic.generated_filename = error.Filename();
+  diagnostic.generated_line = error.Line();
+  diagnostic.generated_column = error.Column();
   diagnostic.stack = error.Stack();
   diagnostic.component_stack = std::string(component_stack);
+
+  const bool map_applies = source_map_ && !source_map_module_.empty()
+      && error.Filename() == source_map_module_;
+  if (map_applies) {
+    if (error.Line() > 0) {
+      if (const auto mapped = source_map_->Find(error.Line(), error.Column(), source_map_base_)) {
+        diagnostic.filename = mapped->filename;
+        diagnostic.line = mapped->line;
+        diagnostic.column = mapped->column;
+      }
+    }
+    diagnostic.stack = RemapStack(
+        diagnostic.stack,
+        source_map_module_,
+        *source_map_,
+        source_map_base_
+    );
+  }
+
   ReportDiagnostic(std::move(diagnostic));
 }
 
@@ -1733,10 +1755,48 @@ void RuntimeImpl::CancelTimers() noexcept {
   timers_.clear();
 }
 
+void RuntimeImpl::PrepareSourceMap(
+    std::string_view source,
+    std::string_view filename,
+    const std::filesystem::path& source_base
+) {
+  source_map_ = SourceMap::FromBundle(source);
+  source_map_module_ = std::string(filename);
+  source_map_base_ = source_base;
+}
+
+void RuntimeImpl::RestoreSourceMap(
+    std::optional<SourceMap> map,
+    std::string filename,
+    std::filesystem::path source_base
+) {
+  source_map_ = std::move(map);
+  source_map_module_ = std::move(filename);
+  source_map_base_ = std::move(source_base);
+}
+
 quickjs::Result<void> RuntimeImpl::Load(std::string_view source, std::string_view filename) {
+  return LoadInternal(source, filename, {});
+}
+
+quickjs::Result<void> RuntimeImpl::LoadInternal(
+    std::string_view source,
+    std::string_view filename,
+    const std::filesystem::path& source_base
+) {
+  auto previous_map = std::move(source_map_);
+  auto previous_module = std::move(source_map_module_);
+  auto previous_base = std::move(source_map_base_);
+  PrepareSourceMap(source, filename, source_base);
+
   const auto result = context_.EvaluateModule(source, filename, MakeEvaluateOptions(options));
   if (!result.Succeeded()) {
     ReportError(DiagnosticPhase::Load, "module evaluation", result.Error());
+    RestoreSourceMap(
+        std::move(previous_map),
+        std::move(previous_module),
+        std::move(previous_base)
+    );
     return quickjs::Result<void>::Failure(result.Error());
   }
   loaded = true;
@@ -1746,6 +1806,7 @@ quickjs::Result<void> RuntimeImpl::Load(std::string_view source, std::string_vie
 quickjs::Result<void> RuntimeImpl::LoadFile(const std::filesystem::path& path) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
+    PrepareSourceMap({}, path.filename().string(), path.parent_path());
     const quickjs::Error error{
         quickjs::ErrorCode::Module,
         "Cannot open TSX bundle: " + path.string(),
@@ -1756,14 +1817,32 @@ quickjs::Result<void> RuntimeImpl::LoadFile(const std::filesystem::path& path) {
   }
   std::ostringstream buffer;
   buffer << stream.rdbuf();
-  return Load(buffer.str(), path.filename().string());
+  return LoadInternal(buffer.str(), path.filename().string(), path.parent_path());
 }
 
 quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_view filename) {
+  return ReloadInternal(source, filename, {});
+}
+
+quickjs::Result<void> RuntimeImpl::ReloadInternal(
+    std::string_view source,
+    std::string_view filename,
+    const std::filesystem::path& source_base
+) {
+  auto previous_map = std::move(source_map_);
+  auto previous_module = std::move(source_map_module_);
+  auto previous_base = std::move(source_map_base_);
+  PrepareSourceMap(source, filename, source_base);
+
   const auto previous_root = context_.Global("__huxerui_root");
   const auto result = context_.EvaluateModule(source, filename, MakeEvaluateOptions(options));
   if (!result.Succeeded()) {
     ReportError(DiagnosticPhase::Reload, "module evaluation", result.Error());
+    RestoreSourceMap(
+        std::move(previous_map),
+        std::move(previous_module),
+        std::move(previous_base)
+    );
     if (previous_root.Succeeded()) {
       static_cast<void>(context_.SetGlobal("__huxerui_root", previous_root.Value()));
     }
@@ -1775,6 +1854,11 @@ quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_v
     if (previous_root.Succeeded()) {
       static_cast<void>(context_.SetGlobal("__huxerui_root", previous_root.Value()));
     }
+    RestoreSourceMap(
+        std::move(previous_map),
+        std::move(previous_module),
+        std::move(previous_base)
+    );
     ReportMessage(DiagnosticPhase::Reload, "mount", "bundle evaluated but did not call mount()");
     return quickjs::Result<void>::Failure(quickjs::Error{
         quickjs::ErrorCode::Exception,
@@ -1786,6 +1870,11 @@ quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_v
   if (previous_root.Succeeded()) {
     const auto same = next_root.Value().StrictEquals(previous_root.Value());
     if (same.Succeeded() && same.Value()) {
+      RestoreSourceMap(
+          std::move(previous_map),
+          std::move(previous_module),
+          std::move(previous_base)
+      );
       ReportMessage(
           DiagnosticPhase::Reload,
           "mount",
@@ -1810,6 +1899,7 @@ quickjs::Result<void> RuntimeImpl::Reload(std::string_view source, std::string_v
 quickjs::Result<void> RuntimeImpl::ReloadFile(const std::filesystem::path& path) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
+    PrepareSourceMap({}, RevisionName(path.filename().string(), revision + 1), path.parent_path());
     const quickjs::Error error{
         quickjs::ErrorCode::Module,
         "Cannot open TSX bundle: " + path.string(),
@@ -1820,7 +1910,11 @@ quickjs::Result<void> RuntimeImpl::ReloadFile(const std::filesystem::path& path)
   }
   std::ostringstream buffer;
   buffer << stream.rdbuf();
-  return Reload(buffer.str(), RevisionName(path.filename().string(), revision + 1));
+  return ReloadInternal(
+      buffer.str(),
+      RevisionName(path.filename().string(), revision + 1),
+      path.parent_path()
+  );
 }
 
 quickjs::Result<void> RuntimeImpl::ReloadConfiguredBundle() {
@@ -1832,7 +1926,11 @@ quickjs::Result<void> RuntimeImpl::ReloadConfiguredBundle() {
     ReportError(DiagnosticPhase::Reload, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
-  return Reload(options.bundle, RevisionName(options.entry_name, revision + 1));
+  return ReloadInternal(
+      options.bundle,
+      RevisionName(options.entry_name, revision + 1),
+      options.module_root
+  );
 }
 
 quickjs::Result<void> RuntimeImpl::LoadConfiguredBundle() {
@@ -1844,7 +1942,7 @@ quickjs::Result<void> RuntimeImpl::LoadConfiguredBundle() {
     ReportError(DiagnosticPhase::Load, "bundle", error);
     return quickjs::Result<void>::Failure(error);
   }
-  return Load(options.bundle, options.entry_name);
+  return LoadInternal(options.bundle, options.entry_name, options.module_root);
 }
 
 quickjs::Result<quickjs::Value> RuntimeImpl::Evaluate(std::string_view source, std::string_view filename) {

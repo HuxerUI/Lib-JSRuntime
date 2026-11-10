@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <string>
@@ -340,6 +341,32 @@ void ConditionalChildren() {
     Check(ui.Find(testing::UiSelector::Text("Two")).Exists(), "array child two should render");
     ui.Find(testing::UiSelector::Key("toggle")).Tap();
     Check(ui.Find(testing::UiSelector::Text("Visible now")).Exists(), "conditional child should appear");
+  });
+}
+
+void ThemeVariants() {
+  const char* bundle = R"JS(
+    import { mount, h, Column, Text, Theme } from "@huxerui/tsx";
+
+    function App() {
+      return h(Column, null,
+        h(Theme, {key: "material", variant: "material"}, h(Text, null, "material")),
+        h(Theme, {key: "material-dark", variant: "materialDark"}, h(Text, null, "material-dark")),
+        h(Theme, {key: "flat", variant: "flat"}, h(Text, null, "flat")),
+        h(Theme, {key: "flat-dark", variant: "flatDark"}, h(Text, null, "flat-dark")),
+        h(Theme, {key: "dark-flag", dark: true}, h(Text, null, "dark-flag"))
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("theme variants", bundle, [](testing::UiTest& ui, tsx::Runtime&) {
+    Check(ui.Find(testing::UiSelector::Text("material")).Exists(), "MaterialTheme should render");
+    Check(ui.Find(testing::UiSelector::Text("material-dark")).Exists(), "MaterialDarkTheme should render");
+    Check(ui.Find(testing::UiSelector::Text("flat")).Exists(), "FlatTheme should render");
+    Check(ui.Find(testing::UiSelector::Text("flat-dark")).Exists(), "FlatDarkTheme should render");
+    Check(ui.Find(testing::UiSelector::Text("dark-flag")).Exists(), "dark prop should render");
   });
 }
 
@@ -1402,6 +1429,40 @@ void LoadDiagnostic() {
   Check(diagnostic->code == quickjs::ErrorCode::Syntax, "load failure should be a syntax error");
   Check(diagnostic->filename == "broken.js", "load diagnostic should preserve the filename");
   Check(diagnostic->line > 0, "load diagnostic should preserve the line");
+  Check(diagnostic->generated_filename == "broken.js",
+        "unmapped diagnostics should keep the generated filename");
+}
+
+void SourceMapDiagnostic(const char* path) {
+  std::fprintf(stderr, "== source map diagnostic (%s)\n", path);
+  tsx::Runtime runtime;
+  const auto loaded = runtime.LoadFile(path);
+  Check(loaded.Succeeded(), "source map bundle should load");
+  g_runtime = &runtime;
+  const Application application{App};
+  testing::UiTest ui(application);
+
+  const std::string generated_filename = std::filesystem::path(path).filename().string();
+  const auto diagnostic = runtime.LastDiagnostic();
+  Check(diagnostic.has_value(), "source map failure should produce a diagnostic");
+  Check(diagnostic->phase == tsx::DiagnosticPhase::Render,
+        "source map failure phase should be render");
+  Check(diagnostic->message.find("mapped boom") != std::string::npos,
+        "source map failure should keep the message");
+  Check(diagnostic->filename.find("source_map.tsx") != std::string::npos,
+        "source map diagnostic should point at the original TSX file");
+  Check(diagnostic->line == 4, "source map diagnostic should point at the throw line");
+  Check(diagnostic->column > 0, "source map diagnostic should keep a source column");
+  Check(diagnostic->generated_filename == generated_filename,
+        "source map diagnostic should retain the generated filename");
+  Check(diagnostic->generated_line > 0,
+        "source map diagnostic should retain the generated line");
+  Check(diagnostic->stack.find("source_map.tsx") != std::string::npos,
+        "remapped stack should name the original TSX file");
+  Check(diagnostic->stack.find(generated_filename + ":") == std::string::npos,
+        "remapped stack should not keep generated bundle frames");
+  Check(diagnostic->description.find("source_map.tsx") != std::string::npos,
+        "formatted diagnostic should name the original TSX file");
 }
 
 void TimerCallbacks() {
@@ -1525,47 +1586,51 @@ void ExecutionBudget() {
 
 } // namespace
 
-int main() {
-  Counter();
-  NestedComponentState();
-  Effects();
-  LayoutReload();
-  MemoAndRefs();
-  ConditionalChildren();
-  TooltipProp();
-  HoverInputEvent();
-  LongPressGestureEvent();
-  MultiTapGestureEvent();
-  VirtualListElement();
-  PopupPresentation();
-  BottomSheetPresentation();
-  SnackBarPresentation();
-  AnchoredMenuPresentation();
-  MenuPresentation();
-  CustomDialogContent();
-  DialogPresentation();
-  ToastPresentation();
-  VirtualGridElement();
-  NavigationBarElement();
-  NavigationPaneElement();
-  TabsAndSegmentedButton();
-  TextFieldEditEvent();
-  DragGestureEvents();
-  ScrollRef();
-  FormProps();
-  InputEvents();
-  FocusRef();
-  ConditionalComponentIdentity();
-  RenderDiagnostic();
-  EventDiagnostic();
-  EffectDiagnostic();
-  LoadDiagnostic();
-  TimerCallbacks();
-  TimerDiagnostic();
-  OperationBudget();
-  ExecutionBudget();
+int main(int argc, char** argv) {
+  std::string_view selected;
+  if (argc == 3 && std::string_view(argv[1]) == "--case") {
+    selected = argv[2];
+  } else if (argc != 1) {
+    std::fprintf(stderr, "usage: %s [--case NAME]\n", argv[0]);
+    return 2;
+  }
+
+  struct TestCase {
+    const char* name;
+    void (*run)();
+  };
+  static constexpr TestCase kCases[] = {
+#define HUXERUI_TSX_TEST(name) {#name, name},
+#include "test_cases.inc"
+#undef HUXERUI_TSX_TEST
+  };
+
+  bool ran = false;
+  for (const auto& test : kCases) {
+    if (!selected.empty() && selected != test.name) {
+      continue;
+    }
+    test.run();
+    ran = true;
+  }
+  if (!selected.empty()) {
+    if (!ran) {
+      std::fprintf(
+          stderr,
+          "unknown test case: %.*s\n",
+          static_cast<int>(selected.size()),
+          selected.data()
+      );
+      return 2;
+    }
+    return 0;
+  }
+
   if (const char* bundle = std::getenv("HUXERUI_TSX_TEST_BUNDLE"); bundle != nullptr && *bundle != '\0') {
     CompiledTsx(bundle);
+  }
+  if (const char* bundle = std::getenv("HUXERUI_TSX_SOURCE_MAP_BUNDLE"); bundle != nullptr && *bundle != '\0') {
+    SourceMapDiagnostic(bundle);
   }
   if (const char* bundle = std::getenv("HUXERUI_TSX_PREVIEW_BUNDLE"); bundle != nullptr && *bundle != '\0') {
     PreviewBundle(bundle);

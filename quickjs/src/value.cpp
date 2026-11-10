@@ -12,9 +12,8 @@ namespace {
 
 static_assert(sizeof(JSValue) <= sizeof(std::uint64_t) * 2, "Value storage is too small for JSValue");
 
-[[nodiscard]] JSValue MakeRaw(std::uint64_t (&words)[2], JSValue value) noexcept {
+void MakeRaw(std::uint64_t (&words)[2], JSValue value) noexcept {
   std::memcpy(words, &value, sizeof(value));
-  return value;
 }
 
 } // namespace

@@ -28,8 +28,22 @@ else ()
     target_compile_options(huxerui_tsx_tests PRIVATE -UNDEBUG)
 endif ()
 
-add_test(NAME huxerui_tsx_tests COMMAND huxerui_tsx_tests)
-set_tests_properties(huxerui_tsx_tests PROPERTIES TIMEOUT 30)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test_cases.inc" HUXERUI_TSX_TEST_CASE_ENTRIES
+        REGEX "^HUXERUI_TSX_TEST\\([A-Za-z0-9_]+\\)$"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_cases.inc"
+)
+if (NOT HUXERUI_TSX_TEST_CASE_ENTRIES)
+    message(FATAL_ERROR "tests/test_cases.inc did not provide any test cases")
+endif ()
+foreach (entry IN LISTS HUXERUI_TSX_TEST_CASE_ENTRIES)
+    string(REGEX REPLACE "^HUXERUI_TSX_TEST\\(([A-Za-z0-9_]+)\\)$" "\\1"
+            HUXERUI_TSX_TEST_CASE "${entry}")
+    add_test(NAME "huxerui_tsx_case_${HUXERUI_TSX_TEST_CASE}"
+            COMMAND huxerui_tsx_tests --case "${HUXERUI_TSX_TEST_CASE}")
+    set_tests_properties("huxerui_tsx_case_${HUXERUI_TSX_TEST_CASE}" PROPERTIES TIMEOUT 30)
+endforeach ()
 
 add_subdirectory("${PROJECT_SOURCE_DIR}/quickjs/tests"
         "${CMAKE_CURRENT_BINARY_DIR}/quickjs-tests"
@@ -70,6 +84,8 @@ if (HUXERUI_TSX_TEST_ESBUILD)
                 --log-level=warning
                 "--external:@huxerui/tsx"
                 "--external:@huxerui/tsx/jsx-runtime"
+                --sourcemap=inline
+                --sources-content=false
     )
     set_tests_properties(huxerui_tsx_compiled_bundle_build PROPERTIES
             FIXTURES_SETUP huxerui_tsx_bundle
@@ -83,6 +99,40 @@ if (HUXERUI_TSX_TEST_ESBUILD)
     )
     set_tests_properties(huxerui_tsx_compiled_bundle PROPERTIES
             FIXTURES_REQUIRED huxerui_tsx_bundle
+            TIMEOUT 60
+    )
+
+    set(HUXERUI_TSX_SOURCE_MAP_SOURCE "${PROJECT_SOURCE_DIR}/tests/fixtures/source_map.tsx")
+    set(HUXERUI_TSX_SOURCE_MAP_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/compiled_source_map.js")
+
+    add_test(NAME huxerui_tsx_source_map_bundle_build
+            COMMAND "${HUXERUI_TSX_TEST_ESBUILD}"
+                "${HUXERUI_TSX_SOURCE_MAP_SOURCE}"
+                --bundle
+                --format=esm
+                --platform=neutral
+                --jsx=automatic
+                --jsx-import-source=@huxerui/tsx
+                --target=es2020
+                "--outfile=${HUXERUI_TSX_SOURCE_MAP_BUNDLE}"
+                --log-level=warning
+                "--external:@huxerui/tsx"
+                "--external:@huxerui/tsx/jsx-runtime"
+                --sourcemap=inline
+                --sources-content=false
+    )
+    set_tests_properties(huxerui_tsx_source_map_bundle_build PROPERTIES
+            FIXTURES_SETUP huxerui_tsx_source_map
+            TIMEOUT 60
+    )
+
+    add_test(NAME huxerui_tsx_source_map
+            COMMAND "${CMAKE_COMMAND}" -E env
+                "HUXERUI_TSX_SOURCE_MAP_BUNDLE=${HUXERUI_TSX_SOURCE_MAP_BUNDLE}"
+                "$<TARGET_FILE:huxerui_tsx_tests>"
+    )
+    set_tests_properties(huxerui_tsx_source_map PROPERTIES
+            FIXTURES_REQUIRED huxerui_tsx_source_map
             TIMEOUT 60
     )
 endif ()

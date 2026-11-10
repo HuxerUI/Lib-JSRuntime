@@ -19,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include "source_map.h"
+
 namespace huxerui::tsx::detail {
 
 struct TimerRecord;
@@ -158,6 +160,27 @@ public:
   bool loaded = false;
 
 private:
+  quickjs::Result<void> LoadInternal(
+      std::string_view source,
+      std::string_view filename,
+      const std::filesystem::path& source_base
+  );
+  quickjs::Result<void> ReloadInternal(
+      std::string_view source,
+      std::string_view filename,
+      const std::filesystem::path& source_base
+  );
+  void PrepareSourceMap(
+      std::string_view source,
+      std::string_view filename,
+      const std::filesystem::path& source_base
+  );
+  void RestoreSourceMap(
+      std::optional<SourceMap> map,
+      std::string filename,
+      std::filesystem::path source_base
+  );
+
   void InstallHostFunctions();
   void InstallModuleLoader();
 
@@ -308,6 +331,9 @@ private:
   std::string active_component_path_;
   std::unordered_map<std::uint64_t, std::uint32_t> root_component_occurrences_;
   std::optional<Diagnostic> last_diagnostic_;
+  std::optional<SourceMap> source_map_;
+  std::string source_map_module_;
+  std::filesystem::path source_map_base_;
   std::uint64_t next_timer_id_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;
   std::uint64_t next_focus_requester_id_ = 1;
