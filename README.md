@@ -646,6 +646,7 @@ contained so they cannot mask the original JavaScript failure.
 | [`src/elements.cpp`](src/elements.cpp) | Host-tag to HuxerUI `View` builders and event forwarding |
 | [`src/props.cpp`](src/props.cpp) | Prop parsing, colors, modifiers, keys |
 | [`src/source_map.cpp`](src/source_map.cpp) | Inline source-map parsing and diagnostic/stack back-mapping |
+| [`src/services.cpp`](src/services.cpp) | Clipboard, HTTP fetch, lifecycle, and Canvas paint host services |
 | [`js/runtime.js`](js/runtime.js) | Embedded `@huxerui/tsx` module: JSX runtimes, hooks, host tags, `mount()` |
 | [`quickjs/`](quickjs) | Embedded Lib-QuickJS wrapper and quickjs-ng `v0.18.0` engine sources |
 | [`quickjs/tests`](quickjs/tests) | Embedded engine contract tests |
@@ -659,7 +660,7 @@ contained so they cannot mask the original JavaScript failure.
 | [`examples/showcase`](examples/showcase) | Feature-complete TSX showcase with one-command preview |
 | [`skills/lib-jsruntime`](skills/lib-jsruntime/SKILL.md) | Agent-facing usage skill and correctness checklist |
 | [`examples/preview`](examples/preview) | Live layout-preview host with file watching and `Runtime::ReloadFile()` |
-| [`tests/`](tests) | Headless composition, state, nested-scope, effect, compiled-TSX, and source-map tests |
+| [`tests/`](tests) | Headless composition, state, effects, components, navigation, services, semantics, file-drop, animation, Canvas, compiled-TSX, and source-map tests |
 
 ## Validation
 
@@ -671,9 +672,14 @@ the embedded `quickjs/` sources:
   preservation, effect run/cleanup, lazy initializers, memo/ref behavior, conditional and array
   children, layout hot reload (new layout, fresh state, failed-reload rollback), structured
   render/event/effect/timer diagnostics with component stacks, timer callbacks, execution budgets,
-  plus end-to-end tests that bundle TSX with the vendored esbuild, load the emitted modules through
-  the runtime, and drive them with `huxerui::testing::UiTest`. A compiled fixture also verifies
+  host services (`fetch` rejection, clipboard availability, lifecycle), the navigation page stack,
+  form/layout components, accessibility semantics, file-drop construction, animation modifiers, and
+  Canvas paint callbacks, plus end-to-end tests that bundle TSX with the vendored esbuild, load the
+  emitted modules through the runtime, and drive them with `huxerui::testing::UiTest`. A compiled
+  fixture also verifies
   source-map back-mapping of the primary location, stack frames, and formatted description.
+- The native CI configure/build/`ctest` path was reproduced locally against a pinned HuxerUI
+  source checkout (49/49 tests).
 - `examples/showcase` builds and its `tsconfig.json` passes `tsc --strict` (`jsx: react-jsx`,
   `jsxImportSource: @huxerui/tsx`).
 - CI also bundles `examples/showcase/src/App.tsx` and verifies the showcase artifact on every

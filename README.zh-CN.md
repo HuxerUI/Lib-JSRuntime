@@ -631,6 +631,7 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
 | [`src/elements.cpp`](src/elements.cpp) | 宿主标签到 HuxerUI `View` 的构建器与事件转发 |
 | [`src/props.cpp`](src/props.cpp) | Prop 解析、颜色、修饰符、key |
 | [`src/source_map.cpp`](src/source_map.cpp) | Inline source map 解析与诊断/stack 回源 |
+| [`src/services.cpp`](src/services.cpp) | Clipboard、HTTP fetch、lifecycle 和 Canvas paint host services |
 | [`js/runtime.js`](js/runtime.js) | 内嵌 `@huxerui/tsx` 模块：JSX runtime、hooks、宿主标签、`mount()` |
 | [`quickjs/`](quickjs) | 内嵌 Lib-QuickJS wrapper 和 quickjs-ng `v0.18.0` engine 源码 |
 | [`quickjs/tests`](quickjs/tests) | 内嵌 engine 契约测试 |
@@ -644,7 +645,7 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
 | [`examples/showcase`](examples/showcase) | 完整能力 showcase + 一键 preview |
 | [`skills/lib-jsruntime`](skills/lib-jsruntime/SKILL.md) | 面向 agent 的使用 skill 与正确性检查清单 |
 | [`examples/preview`](examples/preview) | 实时布局预览 host，带文件监听和 `Runtime::ReloadFile()` |
-| [`tests/`](tests) | Headless composition、state、嵌套 scope、effect、compiled TSX 和 source map 测试 |
+| [`tests/`](tests) | Headless composition、state、effect、组件、导航、服务、semantics、file-drop、动画、Canvas、compiled TSX 和 source map 测试 |
 
 ## 验证
 
@@ -655,9 +656,13 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
 - `ctest` 通过：内嵌 QuickJS engine 测试、counter/updater state、嵌套组件 state 保持、
   effect 运行/清理、惰性初始化、memo/ref 行为、条件与数组 children、布局热重载（新布局、
   fresh state、失败 reload 回滚）、带组件栈的结构化 render/event/effect/timer 诊断、timer
-  回调、执行预算，以及端到端测试：用内置 esbuild 打包 TSX、通过 runtime 的 module loader
-  加载产物，并用 `huxerui::testing::UiTest` 驱动。compiled fixture 还会验证 source map
-  对主位置、stack 帧和格式化 description 的回源。
+  回调、执行预算、宿主服务（`fetch` reject、clipboard 可用性、lifecycle）、导航页面栈、
+  表单/布局组件、无障碍 semantics、file-drop 构造、动画修饰符和 Canvas paint 回调，以及
+  端到端测试：用内置 esbuild 打包 TSX、通过 runtime 的 module loader 加载产物，并用
+  `huxerui::testing::UiTest` 驱动。compiled fixture 还会验证 source map 对主位置、stack
+  帧和格式化 description 的回源。
+- 针对固定版本 HuxerUI 源码 checkout 的 native CI configure/build/`ctest` 路径已在本地复现
+  （49/49 通过）。
 - `examples/showcase` 可以构建，其 `tsconfig.json` 通过 `tsc --strict`（`jsx: react-jsx`，
   `jsxImportSource: @huxerui/tsx`）。
 - CI 还会打包 `examples/showcase/src/App.tsx` 并在每个支持的 host 上验证 showcase 产物。
