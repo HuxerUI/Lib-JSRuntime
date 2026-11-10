@@ -587,6 +587,48 @@ export function setInterval(callback: () => void, delay?: number): TimerHandle;
 export function clearInterval(handle: TimerHandle): void;
 export function queueMicrotask(callback: () => void): void;
 
+export interface FetchOptions {
+  method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | string;
+  headers?: Record<string, string>;
+  body?: string;
+  /** Complete request deadline in milliseconds. Defaults to 30000. */
+  timeout?: number;
+}
+
+export interface FetchResponse {
+  url: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  byteLength: number;
+}
+
+export interface FetchError {
+  code: "transport" | "timeout" | "unsupported";
+  message: string;
+}
+
+/** Sends one HTTP request through the HuxerUI application transport. */
+export function fetch(url: string, options?: FetchOptions): Promise<FetchResponse>;
+
+export function readClipboard(): string | null;
+export function writeClipboard(text: string): boolean;
+export function clipboardAvailable(): boolean;
+
+export interface ClipboardApi {
+  read(): string | null;
+  write(text: string): boolean;
+  available(): boolean;
+}
+
+export const clipboard: ClipboardApi;
+
+/** Requests orderly application shutdown. */
+export function quitApplication(): void;
+
+/** @return The current application lifecycle state, or "unknown" without a live application. */
+export function applicationLifecycle(): "active" | "inactive" | "background" | "unknown";
+
 /** Classic JSX factory for `"jsx": "react"` + `"jsxFactory": "h"`. */
 export function h(type: unknown, props?: Record<string, unknown> | null, ...children: Child[]): VNode;
 export const createElement: typeof h;

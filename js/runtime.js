@@ -267,6 +267,42 @@ export function queueMicrotask(callback) {
   globalThis.queueMicrotask(callback);
 }
 
+export function readClipboard() {
+  return __huxerui_clipboardRead();
+}
+
+export function writeClipboard(text) {
+  return __huxerui_clipboardWrite(String(text));
+}
+
+export function clipboardAvailable() {
+  return __huxerui_clipboardAvailable();
+}
+
+export const clipboard = Object.freeze({
+  read: readClipboard,
+  write: writeClipboard,
+  available: clipboardAvailable,
+});
+
+export function quitApplication() {
+  __huxerui_quitApplication();
+}
+
+export function applicationLifecycle() {
+  return __huxerui_applicationLifecycle();
+}
+
+export function fetch(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    __huxerui_fetch(url, options, resolve, reject);
+  });
+}
+
+if (typeof globalThis.fetch === "undefined") {
+  globalThis.fetch = fetch;
+}
+
 // Small console shim; the host forwards it to RuntimeOptions::on_log.
 function formatLogArgument(value) {
   if (typeof value === "string") {

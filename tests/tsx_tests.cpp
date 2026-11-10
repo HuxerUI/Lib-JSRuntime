@@ -1465,6 +1465,73 @@ void SourceMapDiagnostic(const char* path) {
         "formatted diagnostic should name the original TSX file");
 }
 
+void ServiceBridge() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Text, useState, useEffect,
+      clipboardAvailable, readClipboard, applicationLifecycle,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("pending");
+      useEffect(() => {
+        const available = clipboardAvailable();
+        const read = readClipboard();
+        const lifecycle = applicationLifecycle();
+        setStatus(
+          typeof available === "boolean" &&
+          (read === null || typeof read === "string") &&
+          typeof lifecycle === "string" &&
+          lifecycle.length > 0
+            ? "services-ok"
+            : "services-failed"
+        );
+      }, []);
+      return h(Column, null, h(Text, {key: "services-status"}, status));
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("HUI services", bundle, [](testing::UiTest& ui, tsx::Runtime&) {
+    ui.Pump();
+    Check(ui.Find(testing::UiSelector::Text("services-ok")).Exists(),
+          "clipboard and application lifecycle services should be callable");
+  });
+}
+
+void FetchRejection() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Text, useState, useEffect, fetch,
+    } from "@huxerui/tsx";
+
+    function App() {
+      const [status, setStatus] = useState("pending");
+      useEffect(() => {
+        fetch("not-a-valid-url").then(
+          () => setStatus("resolved"),
+          () => setStatus("rejected")
+        );
+      }, []);
+      return h(Text, {key: "fetch-status"}, status);
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("fetch rejection", bundle, [](testing::UiTest& ui, tsx::Runtime& runtime) {
+    for (int attempt = 0; attempt < 5; ++attempt) {
+      ui.Pump(std::chrono::milliseconds(20));
+    }
+    if (const auto diagnostic = runtime.LastDiagnostic()) {
+      std::fprintf(stderr, "fetch diagnostic: %s\n", diagnostic->description.c_str());
+    }
+    Check(ui.Find(testing::UiSelector::Text("rejected")).Exists(),
+          "invalid fetch requests should reject their Promise");
+  });
+}
+
 void TimerCallbacks() {
   const char* bundle = R"JS(
     import {

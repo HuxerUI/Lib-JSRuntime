@@ -47,6 +47,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 | Native modifiers | padding, spacing, frame/width/height, background, foreground, border, corner radius, shadow, clip, enabled, focusable, main/cross alignment, align, grow, `onClick` |
 | Event callbacks | `onClick`; pointer down/move/up/cancel/intercept; hover enter/move/leave; scroll; key down/up/intercept; focus/blur; context menu; Back; `onChange`/`onSubmit` on form controls |
 | Host extension | `Runtime::RegisterFunction()`, `Runtime::SetModuleLoader()`, `Runtime::Evaluate()`, `Runtime::Invoke()` |
+| Host services | `fetch()`, `readClipboard()`/`writeClipboard()`/`clipboardAvailable()`, `applicationLifecycle()`, `quitApplication()` |
 | Diagnostics | `RuntimeOptions::on_diagnostic`, `on_log`, `on_error`, `Runtime::LastDiagnostic()`, inline render error `Text` |
 | Execution budgets | `RuntimeOptions::evaluation_time_limit`, `operation_time_limit`, `should_interrupt`, `stack_limit_bytes` |
 | Timers | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, runtime `queueMicrotask` |
@@ -461,6 +462,43 @@ runtime.RegisterFunction("readClipboard", [](quickjs::Context& context, std::spa
 Host globals are registered before bundle evaluation. Bundling is recommended so the application
 does not need a JS module graph at runtime.
 
+## Host services
+
+The embedded module exposes the running HuxerUI application's standard services. They require an
+initialized application on the application thread; without one, clipboard reads return `null`,
+writes return `false`, lifecycle reports `"unknown"`, and `fetch()` rejects.
+
+```tsx
+import {
+  fetch, clipboardAvailable, writeClipboard, applicationLifecycle,
+} from "@huxerui/tsx";
+
+useEffect(() => {
+  fetch("https://example.com/data.json", {timeout: 5000})
+    .then((response) => {
+      // response: { url, status, headers, body, byteLength }
+      setData(JSON.parse(response.body));
+    })
+    .catch((error) => setError(String(error?.message ?? error)));
+}, []);
+```
+
+`fetch(url, options?)` returns `Promise<{ url, status, headers, body, byteLength }>`. HTTP 4xx and
+5xx responses resolve normally; transport, timeout, unsupported transport, and argument failures
+reject with `{ code: "transport" | "timeout" | "unsupported", message }` or a validation string.
+
+| Option | Meaning |
+| --- | --- |
+| `method` | `GET` (default), `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| `headers` | `Record<string, string>` |
+| `body` | UTF-8 request body string |
+| `timeout` | Complete request deadline in milliseconds; default 30000 |
+
+`readClipboard()`, `writeClipboard(text)`, and `clipboardAvailable()` are synchronous
+application-thread calls; the `clipboard` object groups them. `applicationLifecycle()` reports
+`"active"`, `"inactive"`, `"background"`, or `"unknown"`. `quitApplication()` requests orderly
+shutdown. General asynchronous host I/O still goes through `Runtime::RegisterFunction()`.
+
 ## Diagnostics and execution budgets
 
 Every bridge failure is normalized into `tsx::Diagnostic` before it reaches `on_log` or `on_error`:
@@ -509,8 +547,9 @@ contained so they cannot mask the original JavaScript failure.
 - `margin` is not translated; HuxerUI uses padding and spacing.
 - Events cover click, pointer, hover, scroll, key, focus, context menu, Back, drag, long press, and
   multi tap, plus toggle, slider, chip, and text-field changes.
-- Timers cover `setTimeout`, `setInterval`, and `queueMicrotask`; `requestAnimationFrame`, `fetch`,
-  and general async host I/O are not exposed yet.
+- Timers cover `setTimeout`, `setInterval`, and `queueMicrotask`; `requestAnimationFrame` and
+  general async host I/O beyond `fetch()` are not exposed. `fetch()` buffers the complete response
+  body and exposes UTF-8 text; streaming and binary payloads are not exposed.
 - Images resolve local files and packaged image resource keys; raw SVG text, network URLs, and
   arbitrary programmatic vector construction are not exposed through TSX props.
 - Routed navigation, animation, and canvas are not bridged yet.

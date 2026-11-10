@@ -6,6 +6,7 @@
 #include <huxerui/scroll.h>
 #include <huxerui/quickjs.h>
 #include <huxerui/state.h>
+#include <huxerui/task.h>
 #include <huxerui/tsx.h>
 
 #include <cstdint>
@@ -321,6 +322,24 @@ private:
       quickjs::Context& owner,
       std::span<const quickjs::Value> arguments
   );
+  [[nodiscard]] quickjs::Value HostClipboardRead(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostClipboardWrite(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostClipboardAvailable(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostFetch(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostQuitApplication(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
+  [[nodiscard]] quickjs::Value HostApplicationLifecycle(
+      quickjs::Context& owner, std::span<const quickjs::Value> arguments
+  );
   void ScheduleTimer(const std::shared_ptr<TimerRecord>& timer);
   void FireTimer(const std::shared_ptr<TimerRecord>& timer);
   void CancelTimers() noexcept;
@@ -334,6 +353,7 @@ private:
   std::optional<SourceMap> source_map_;
   std::string source_map_module_;
   std::filesystem::path source_map_base_;
+  std::vector<huxerui::TaskHandle> async_tasks_;
   std::uint64_t next_timer_id_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;
   std::uint64_t next_focus_requester_id_ = 1;

@@ -67,6 +67,10 @@ huxerui::tsx::Runtime runtime(huxerui::tsx::RuntimeOptions{
 `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`,
 `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages`.
 
+`Theme` selects `material`, `materialDark`, `flat`, or `flatDark` with `variant` (or `dark`).
+Text/button/navigation labels accept `{ resource: "domain:key" }`; image `src` accepts a local
+path, `{ file }`, or `{ resource }`. Packaged strings resolve in the mounted `Locale`.
+
 `padding`, `spacing`, `frame`, `width`, `height`, `grow`, `background`, `foreground`, `border`,
 `cornerRadius`, `shadow`, `clipChildren`, `enabled`, `focusable`, `tooltip`, `align`,
 `mainAlign`, `crossAlign` are shared. `margin` is unsupported.
@@ -121,6 +125,15 @@ sheet.show(() => <Text>Sheet content</Text>);
 
 Custom presentation content factories run outside the declaring component's hook scope. They must
 not call hooks; return a function component instead.
+
+## Host services
+
+- `fetch(url, options?)` returns `Promise<{ url, status, headers, body, byteLength }>`; transport,
+  timeout, and unsupported transport reject with `{ code, message }`.
+- `readClipboard()`, `writeClipboard(text)`, `clipboardAvailable()`, `applicationLifecycle()`, and
+  `quitApplication()` are synchronous application-thread services.
+- All of them require a live HuxerUI application; outside one, reads return `null`, writes return
+  `false`, lifecycle reports `"unknown"`, and `fetch` rejects.
 
 ## Toolchain
 

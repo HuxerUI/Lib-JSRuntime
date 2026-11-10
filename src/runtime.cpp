@@ -361,6 +361,10 @@ RuntimeImpl::RuntimeImpl(RuntimeOptions options_in)
 }
 
 RuntimeImpl::~RuntimeImpl() {
+  for (const auto& task : async_tasks_) {
+    task.Cancel();
+  }
+  async_tasks_.clear();
   CancelTimers();
 }
 
@@ -486,6 +490,24 @@ void RuntimeImpl::InstallHostFunctions() {
   install("__huxerui_dismissPopup", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     return HostDismissPopup(owner, arguments);
   }, 2);
+  install("__huxerui_clipboardRead", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostClipboardRead(owner, arguments);
+  }, 0);
+  install("__huxerui_clipboardWrite", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostClipboardWrite(owner, arguments);
+  }, 1);
+  install("__huxerui_clipboardAvailable", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostClipboardAvailable(owner, arguments);
+  }, 0);
+  install("__huxerui_fetch", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostFetch(owner, arguments);
+  }, 4);
+  install("__huxerui_quitApplication", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostQuitApplication(owner, arguments);
+  }, 0);
+  install("__huxerui_applicationLifecycle", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
+    return HostApplicationLifecycle(owner, arguments);
+  }, 0);
   install("__huxerui_log", [this](quickjs::Context& owner, std::span<const quickjs::Value> arguments) {
     if (arguments.size() < 2) {
       return owner.Undefined();

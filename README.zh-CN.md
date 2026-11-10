@@ -28,6 +28,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 - [Hooks](#hooks)
 - [事件](#事件)
 - [模块与宿主函数](#模块与宿主函数)
+- [宿主服务](#宿主服务)
 - [限制](#限制)
 - [仓库结构](#仓库结构)
 - [验证](#验证)
@@ -47,6 +48,7 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 | 原生修饰符 | padding、spacing、frame/width/height、background、foreground、border、corner radius、shadow、clip、enabled、focusable、main/cross alignment、align、grow、`onClick` |
 | 事件回调 | `onClick`；pointer down/move/up/cancel/intercept；hover enter/move/leave；scroll；key down/up/intercept；focus/blur；context menu；Back；表单控件的 `onChange`/`onSubmit` |
 | 宿主扩展 | `Runtime::RegisterFunction()`, `Runtime::SetModuleLoader()`, `Runtime::Evaluate()`, `Runtime::Invoke()` |
+| 宿主服务 | `fetch()`, `readClipboard()`/`writeClipboard()`/`clipboardAvailable()`, `applicationLifecycle()`, `quitApplication()` |
 | 诊断 | `RuntimeOptions::on_diagnostic`, `on_log`, `on_error`, `Runtime::LastDiagnostic()`, 内联渲染错误 `Text` |
 | 执行预算 | `RuntimeOptions::evaluation_time_limit`, `operation_time_limit`, `should_interrupt`, `stack_limit_bytes` |
 | 定时器 | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, runtime `queueMicrotask` |
@@ -450,6 +452,43 @@ runtime.RegisterFunction("readClipboard", [](quickjs::Context& context, std::spa
 
 Host globals 在 bundle 执行前注册。推荐打包应用，这样运行时不需要 JS module graph。
 
+## 宿主服务
+
+内嵌模块暴露正在运行的 HuxerUI 应用的标准服务。它们需要应用已初始化并在应用线程调用；
+没有应用时，clipboard 读取返回 `null`，写入返回 `false`，lifecycle 返回 `"unknown"`，
+`fetch()` 会 reject。
+
+```tsx
+import {
+  fetch, clipboardAvailable, writeClipboard, applicationLifecycle,
+} from "@huxerui/tsx";
+
+useEffect(() => {
+  fetch("https://example.com/data.json", {timeout: 5000})
+    .then((response) => {
+      // response: { url, status, headers, body, byteLength }
+      setData(JSON.parse(response.body));
+    })
+    .catch((error) => setError(String(error?.message ?? error)));
+}, []);
+```
+
+`fetch(url, options?)` 返回 `Promise<{ url, status, headers, body, byteLength }>`。HTTP 4xx/5xx
+正常 resolve；transport、timeout、unsupported transport 和参数错误会 reject，
+reason 为 `{ code: "transport" | "timeout" | "unsupported", message }` 或校验错误字符串。
+
+| 选项 | 含义 |
+| --- | --- |
+| `method` | `GET`（默认）、`HEAD`、`POST`、`PUT`、`PATCH`、`DELETE`、`OPTIONS` |
+| `headers` | `Record<string, string>` |
+| `body` | UTF-8 请求体字符串 |
+| `timeout` | 完整请求超时（毫秒）；默认 30000 |
+
+`readClipboard()`、`writeClipboard(text)` 和 `clipboardAvailable()` 是应用线程上的同步调用；
+`clipboard` 对象把它们组合在一起。`applicationLifecycle()` 返回 `"active"`、`"inactive"`、
+`"background"` 或 `"unknown"`。`quitApplication()` 请求有序退出。通用异步宿主 I/O 仍通过
+`Runtime::RegisterFunction()` 扩展。
+
 ## 诊断与执行预算
 
 每个 bridge 失败都会在到达 `on_log` 或 `on_error` 之前规范化为 `tsx::Diagnostic`：
@@ -497,8 +536,9 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
 - 不翻译 `margin`；HuxerUI 使用 padding 和 spacing。
 - 事件覆盖 click、pointer、hover、scroll、key、focus、context menu、Back、drag、long
   press 和 multi tap，以及 toggle、slider、chip 和 text-field 变化。
-- 定时器覆盖 `setTimeout`、`setInterval` 和 `queueMicrotask`；`requestAnimationFrame`、
-  `fetch` 和通用异步宿主 I/O 尚未暴露。
+- 定时器覆盖 `setTimeout`、`setInterval` 和 `queueMicrotask`；`requestAnimationFrame` 和
+  `fetch()` 之外的通用异步宿主 I/O 尚未暴露。`fetch()` 缓冲完整响应体并暴露 UTF-8 文本；
+  流式和二进制 payload 尚未暴露。
 - 图片解析本地文件和打包图片资源 key；TSX props 不暴露原始 SVG 文本、网络 URL 和任意程序化矢量构建。
 - 路由导航、动画和 canvas 尚未桥接。
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` 是在虚拟测量期间运行的声明式
