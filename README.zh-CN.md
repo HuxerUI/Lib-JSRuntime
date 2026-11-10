@@ -331,6 +331,11 @@ preview 可接受，但不适合无界的生产热更新服务。
 | `grow` | `Grow`（`true` 或一个系数） |
 | `tooltip` | `Tooltip`（字符串消息） |
 | `semantics` | `Semantics`（role、label、value、hint、状态标志、live region） |
+| `fileDrop` | `FileDropTarget`（`true` 或 `{ extensions, contentTypes, allowsMultiple }`） |
+
+`fileDrop` 同时接受 `onFileDrop(files, event)`、`onFileDropEnter/Move/Exit(offer, event)` 和
+`onFileDropFailed(error, event)`。drop 的 file reference 暴露 `name`、`size`、`contentType`、
+`canWrite`、`type` 和可选的本地 `path`；文件内容读取仍由应用自己负责。
 
 颜色接受 `#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb(...)`、`rgba(...)`、常见颜色名、
 `0xRRGGBB`、`[r, g, b, a?]` 或 `{ r, g, b, a? }`。通道范围 0–255；alpha 范围 0–1。

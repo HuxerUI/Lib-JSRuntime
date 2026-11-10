@@ -1568,7 +1568,12 @@ void FormComponents() {
         h(SplitLayout, {key: "split", axis: "horizontal"},
           h(Text, {key: "pane-1", grow: 1}, "Pane one"),
           h(Text, {key: "pane-2", grow: 1}, "Pane two")
-        )
+        ),
+        h(Text, {
+          key: "drop",
+          fileDrop: {contentTypes: ["image/*"]},
+          onFileDrop: () => {},
+        }, "Drop here")
       );
     }
 
@@ -1579,6 +1584,7 @@ void FormComponents() {
     Check(ui.Find(testing::UiSelector::Key("refresh")).Exists(), "RefreshBox should render");
     Check(ui.Find(testing::UiSelector::Key("pager")).Exists(), "Pager should render");
     Check(ui.Find(testing::UiSelector::Key("split")).Exists(), "SplitLayout should render");
+    Check(ui.Find(testing::UiSelector::Key("drop")).Exists(), "fileDrop should render");
     Check(ui.Find(testing::UiSelector::Text("Components")).Exists(),
           "TopAppBar should render its title");
     Check(ui.Find(testing::UiSelector::Text("Refresh content")).Exists(),

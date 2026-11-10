@@ -69,7 +69,8 @@ huxerui::tsx::Runtime runtime(huxerui::tsx::RuntimeOptions{
 `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages`.
 
 `Select`, `ComboBox`, `DatePicker`, and `TimePicker` require the HuxerUI framework resource package.
-Every host element accepts a `semantics` object (role, label, hint, state flags, identifier).
+Every host element accepts a `semantics` object (role, label, hint, state flags, identifier) and
+`fileDrop` (`true` or filter options) with `onFileDrop`/enter/move/exit/failed callbacks.
 
 `Theme` selects `material`, `materialDark`, `flat`, or `flatDark` with `variant` (or `dark`).
 Text/button/navigation labels accept `{ resource: "domain:key" }`; image `src` accepts a local

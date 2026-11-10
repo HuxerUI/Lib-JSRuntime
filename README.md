@@ -337,6 +337,11 @@ Shared props map one-to-one onto HuxerUI modifiers:
 | `grow` | `Grow` (`true` or a factor) |
 | `tooltip` | `Tooltip` (string message) |
 | `semantics` | `Semantics` (role, label, value, hint, state flags, live region) |
+| `fileDrop` | `FileDropTarget` (`true` or `{ extensions, contentTypes, allowsMultiple }`) |
+
+`fileDrop` also accepts `onFileDrop(files, event)`, `onFileDropEnter/Move/Exit(offer, event)`, and
+`onFileDropFailed(error, event)`. Dropped file references expose `name`, `size`, `contentType`,
+`canWrite`, `type`, and an optional native `path`; reading their contents stays application-owned.
 
 Colors accept `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(...)`, `rgba(...)`, common names,
 `0xRRGGBB`, `[r, g, b, a?]`, or `{ r, g, b, a? }`. Channels are 0–255; alpha is 0–1.

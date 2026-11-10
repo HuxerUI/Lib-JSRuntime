@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 
+#include <huxerui/file_drop.h>
 #include <huxerui/paint.h>
 
 namespace huxerui::tsx::detail {
@@ -709,6 +710,215 @@ std::optional<Semantics> SemanticsFromProps(const quickjs::Value& props) {
   return semantics;
 }
 
+const char* FileTypeName(FileType type) noexcept {
+  switch (type) {
+    case FileType::File:
+      return "file";
+    case FileType::Directory:
+      return "directory";
+    case FileType::Other:
+      return "other";
+  }
+  return "other";
+}
+
+const char* IoErrorName(IoErrorCode code) noexcept {
+  switch (code) {
+    case IoErrorCode::NotFound:
+      return "notFound";
+    case IoErrorCode::PermissionDenied:
+      return "permissionDenied";
+    case IoErrorCode::NotDirectory:
+      return "notDirectory";
+    case IoErrorCode::IsDirectory:
+      return "isDirectory";
+    case IoErrorCode::TooLarge:
+      return "tooLarge";
+    case IoErrorCode::InvalidEncoding:
+      return "invalidEncoding";
+    case IoErrorCode::Unsupported:
+      return "unsupported";
+    case IoErrorCode::Io:
+      return "io";
+    case IoErrorCode::AlreadyExists:
+      return "alreadyExists";
+    case IoErrorCode::Timeout:
+      return "timeout";
+    case IoErrorCode::NoSpace:
+      return "noSpace";
+  }
+  return "io";
+}
+
+quickjs::Result<quickjs::Value> MakeFileDropOffer(
+    quickjs::Context& context,
+    const FileDropOffer& offer
+) {
+  auto object = context.NewObject();
+  if (!object.Succeeded()) {
+    return object;
+  }
+  if (offer.item_count) {
+    static_cast<void>(object.Value().SetProperty(
+        "count",
+        context.Number(static_cast<double>(*offer.item_count))
+    ));
+  }
+  auto types = context.NewArray();
+  if (types.Succeeded()) {
+    for (std::size_t index = 0; index < offer.content_types.size(); ++index) {
+      const auto text = context.NewString(offer.content_types[index]);
+      if (text.Succeeded()) {
+        static_cast<void>(types.Value().SetElement(
+            static_cast<std::uint32_t>(index),
+            text.Value()
+        ));
+      }
+    }
+    static_cast<void>(object.Value().SetProperty("contentTypes", types.Value()));
+  }
+  return object;
+}
+
+quickjs::Result<quickjs::Value> MakeFileDropEvent(
+    quickjs::Context& context,
+    const FileDropEvent& event
+) {
+  auto object = context.NewObject();
+  if (!object.Succeeded()) {
+    return object;
+  }
+  static_cast<void>(object.Value().SetProperty("x", context.Number(event.position.x)));
+  static_cast<void>(object.Value().SetProperty("y", context.Number(event.position.y)));
+  static_cast<void>(object.Value().SetProperty(
+      "windowX",
+      context.Number(event.window_position.x)
+  ));
+  static_cast<void>(object.Value().SetProperty(
+      "windowY",
+      context.Number(event.window_position.y)
+  ));
+  return object;
+}
+
+quickjs::Result<quickjs::Value> MakeFileReferenceValue(
+    quickjs::Context& context,
+    const FileReference& reference
+) {
+  auto object = context.NewObject();
+  if (!object.Succeeded()) {
+    return object;
+  }
+  if (const auto text = context.NewString(reference.Name()); text.Succeeded()) {
+    static_cast<void>(object.Value().SetProperty("name", text.Value()));
+  }
+  if (const auto size = reference.Size()) {
+    static_cast<void>(object.Value().SetProperty(
+        "size",
+        context.Number(static_cast<double>(*size))
+    ));
+  }
+  if (const auto content_type = reference.ContentType()) {
+    if (const auto text = context.NewString(*content_type); text.Succeeded()) {
+      static_cast<void>(object.Value().SetProperty("contentType", text.Value()));
+    }
+  }
+  static_cast<void>(object.Value().SetProperty(
+      "canWrite",
+      context.Boolean(reference.CanWrite())
+  ));
+  if (const auto text = context.NewString(FileTypeName(reference.Type())); text.Succeeded()) {
+    static_cast<void>(object.Value().SetProperty("type", text.Value()));
+  }
+  if (const auto file = reference.AsFile()) {
+    if (const auto text = context.NewString(file->Path()); text.Succeeded()) {
+      static_cast<void>(object.Value().SetProperty("path", text.Value()));
+    }
+  }
+  return object;
+}
+
+quickjs::Result<quickjs::Value> MakeFileReferenceArray(
+    quickjs::Context& context,
+    const std::vector<FileReference>& references
+) {
+  auto array = context.NewArray();
+  if (!array.Succeeded()) {
+    return array;
+  }
+  for (std::size_t index = 0; index < references.size(); ++index) {
+    const auto value = MakeFileReferenceValue(context, references[index]);
+    if (value.Succeeded()) {
+      static_cast<void>(array.Value().SetElement(
+          static_cast<std::uint32_t>(index),
+          value.Value()
+      ));
+    }
+  }
+  return array;
+}
+
+quickjs::Result<quickjs::Value> MakeIoErrorValue(
+    quickjs::Context& context,
+    const IoError& error
+) {
+  auto object = context.NewObject();
+  if (!object.Succeeded()) {
+    return object;
+  }
+  if (const auto text = context.NewString(IoErrorName(error.code)); text.Succeeded()) {
+    static_cast<void>(object.Value().SetProperty("code", text.Value()));
+  }
+  if (const auto text = context.NewString(error.message); text.Succeeded()) {
+    static_cast<void>(object.Value().SetProperty("message", text.Value()));
+  }
+  return object;
+}
+
+std::optional<FileDropOptions> FileDropOptionsFromProps(const quickjs::Value& props) {
+  const auto value = Property(props, "fileDrop");
+  if (!value) {
+    return std::nullopt;
+  }
+  if (value->IsBoolean()) {
+    const auto enabled = value->ToBoolean();
+    if (!enabled.Succeeded() || !enabled.Value()) {
+      return std::nullopt;
+    }
+    return FileDropOptions{};
+  }
+  if (!value->IsObject()) {
+    return std::nullopt;
+  }
+  FileDropOptions options;
+  const auto read_list = [&value](const char* name, std::vector<std::string>& output) {
+    const auto list = Property(*value, name);
+    if (!list || !list->IsArray()) {
+      return;
+    }
+    const auto length = list->Length();
+    if (!length.Succeeded()) {
+      return;
+    }
+    for (std::int64_t index = 0; index < length.Value(); ++index) {
+      const auto element = list->GetElement(static_cast<std::uint32_t>(index));
+      if (!element.Succeeded()) {
+        continue;
+      }
+      const auto text = element.Value().ToString();
+      if (text.Succeeded()) {
+        output.push_back(text.Value());
+      }
+    }
+  };
+  read_list("extensions", options.extensions);
+  read_list("contentTypes", options.content_types);
+  if (const auto multiple = BoolProperty(*value, "allowsMultiple")) {
+    options.allows_multiple = *multiple;
+  }
+  return options;
+}
+
 View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& props) {
   if (const auto spacing = NumberProperty(props, "spacing")) {
     view = AddModifier(std::move(view), Spacing(static_cast<float>(*spacing)));
@@ -898,6 +1108,110 @@ View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& pro
   }
   if (const auto tooltip = StringProperty(props, "tooltip"); tooltip && !tooltip->empty()) {
     view = std::move(view).With(huxerui::Tooltip(*tooltip));
+  }
+  if (const auto drop = FileDropOptionsFromProps(props)) {
+    view = std::move(view).With(FileDropTarget::Accepts(*drop));
+    const std::string component = runtime.CurrentComponentPath();
+    if (const auto handler = Property(props, "onFileDrop");
+        handler && handler->IsFunction()) {
+      view = std::move(view).On<FileDropEvents::Dropped>(
+          [impl = &runtime, function = *handler, component](
+              const std::vector<FileReference>& files,
+              const FileDropEvent& event) {
+            const auto array = MakeFileReferenceArray(impl->Context(), files);
+            const auto point = MakeFileDropEvent(impl->Context(), event);
+            if (array.Succeeded() && point.Succeeded()) {
+              const quickjs::Value arguments[]{array.Value(), point.Value()};
+              impl->InvokeHandler(
+                  function,
+                  arguments,
+                  DiagnosticPhase::Event,
+                  component
+              );
+            }
+          }
+      );
+    }
+    if (const auto handler = Property(props, "onFileDropEnter");
+        handler && handler->IsFunction()) {
+      view = std::move(view).On<FileDropEvents::Entered>(
+          [impl = &runtime, function = *handler, component](
+              const FileDropOffer& offer,
+              const FileDropEvent& event) {
+            const auto offer_value = MakeFileDropOffer(impl->Context(), offer);
+            const auto point = MakeFileDropEvent(impl->Context(), event);
+            if (offer_value.Succeeded() && point.Succeeded()) {
+              const quickjs::Value arguments[]{offer_value.Value(), point.Value()};
+              impl->InvokeHandler(
+                  function,
+                  arguments,
+                  DiagnosticPhase::Event,
+                  component
+              );
+            }
+          }
+      );
+    }
+    if (const auto handler = Property(props, "onFileDropMove");
+        handler && handler->IsFunction()) {
+      view = std::move(view).On<FileDropEvents::Moved>(
+          [impl = &runtime, function = *handler, component](
+              const FileDropOffer& offer,
+              const FileDropEvent& event) {
+            const auto offer_value = MakeFileDropOffer(impl->Context(), offer);
+            const auto point = MakeFileDropEvent(impl->Context(), event);
+            if (offer_value.Succeeded() && point.Succeeded()) {
+              const quickjs::Value arguments[]{offer_value.Value(), point.Value()};
+              impl->InvokeHandler(
+                  function,
+                  arguments,
+                  DiagnosticPhase::Event,
+                  component
+              );
+            }
+          }
+      );
+    }
+    if (const auto handler = Property(props, "onFileDropExit");
+        handler && handler->IsFunction()) {
+      view = std::move(view).On<FileDropEvents::Exited>(
+          [impl = &runtime, function = *handler, component](
+              const FileDropOffer& offer,
+              const FileDropEvent& event) {
+            const auto offer_value = MakeFileDropOffer(impl->Context(), offer);
+            const auto point = MakeFileDropEvent(impl->Context(), event);
+            if (offer_value.Succeeded() && point.Succeeded()) {
+              const quickjs::Value arguments[]{offer_value.Value(), point.Value()};
+              impl->InvokeHandler(
+                  function,
+                  arguments,
+                  DiagnosticPhase::Event,
+                  component
+              );
+            }
+          }
+      );
+    }
+    if (const auto handler = Property(props, "onFileDropFailed");
+        handler && handler->IsFunction()) {
+      view = std::move(view).On<FileDropEvents::Failed>(
+          [impl = &runtime, function = *handler, component](
+              const IoError& error,
+              const FileDropEvent& event) {
+            const auto error_value = MakeIoErrorValue(impl->Context(), error);
+            const auto point = MakeFileDropEvent(impl->Context(), event);
+            if (error_value.Succeeded() && point.Succeeded()) {
+              const quickjs::Value arguments[]{error_value.Value(), point.Value()};
+              impl->InvokeHandler(
+                  function,
+                  arguments,
+                  DiagnosticPhase::Event,
+                  component
+              );
+            }
+          }
+      );
+    }
   }
   view = runtime.ApplyMenuAnchor(std::move(view), props);
   view = runtime.ApplyPopupAnchor(std::move(view), props);

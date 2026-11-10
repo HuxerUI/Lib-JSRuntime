@@ -190,6 +190,40 @@ export interface SemanticsSpec {
   hidden?: boolean;
 }
 
+export interface FileDropSpec {
+  extensions?: readonly string[];
+  contentTypes?: readonly string[];
+  allowsMultiple?: boolean;
+}
+
+export interface FileDropPoint {
+  x: number;
+  y: number;
+  windowX: number;
+  windowY: number;
+}
+
+export interface FileDropOffer {
+  count?: number;
+  contentTypes: string[];
+}
+
+export interface FileReferenceInfo {
+  name: string;
+  size?: number;
+  contentType?: string;
+  canWrite: boolean;
+  type: "file" | "directory" | "other";
+  /** Native path when the platform provides one; not a portable access grant. */
+  path?: string;
+}
+
+export interface FileDropError {
+  code: "notFound" | "permissionDenied" | "notDirectory" | "isDirectory" | "tooLarge"
+    | "invalidEncoding" | "unsupported" | "io" | "alreadyExists" | "timeout" | "noSpace";
+  message: string;
+}
+
 export interface CommonProps {
   key?: Key;
   children?: Child;
@@ -254,6 +288,13 @@ export interface CommonProps {
   menuAnchor?: MenuRef;
   /** Native accessibility metadata applied to this view. */
   semantics?: SemanticsSpec;
+  /** Receives external file drops; true accepts any ordinary file. */
+  fileDrop?: boolean | FileDropSpec;
+  onFileDrop?: (files: readonly FileReferenceInfo[], event: FileDropPoint) => void;
+  onFileDropEnter?: (offer: FileDropOffer, event: FileDropPoint) => void;
+  onFileDropMove?: (offer: FileDropOffer, event: FileDropPoint) => void;
+  onFileDropExit?: (offer: FileDropOffer, event: FileDropPoint) => void;
+  onFileDropFailed?: (error: FileDropError, event: FileDropPoint) => void;
   /** Native focus target; bind to one focusable host element. */
   ref?: FocusRef;
   /** Alias for `ref`. */
