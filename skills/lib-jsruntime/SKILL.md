@@ -62,10 +62,14 @@ huxerui::tsx::Runtime runtime(huxerui::tsx::RuntimeOptions{
 
 ## Host tags
 
-`Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Divider`,
-`Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`,
-`Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`,
+`Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Select`,
+`ComboBox`, `DatePicker`, `TimePicker`, `RefreshBox`, `Pager`, `SplitLayout`, `TopAppBar`,
+`Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`,
+`Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`,
 `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages`.
+
+`Select`, `ComboBox`, `DatePicker`, and `TimePicker` require the HuxerUI framework resource package.
+Every host element accepts a `semantics` object (role, label, hint, state flags, identifier).
 
 `Theme` selects `material`, `materialDark`, `flat`, or `flatDark` with `variant` (or `dark`).
 Text/button/navigation labels accept `{ resource: "domain:key" }`; image `src` accepts a local

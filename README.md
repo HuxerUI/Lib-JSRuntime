@@ -44,7 +44,8 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 | Render into a HuxerUI application | `Runtime::Root()`, `tsx::TsxRoot(Runtime&)` |
 | Function components with stable, positional state | `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback` |
 | Commit-time effects and cleanup | `useEffect`, `useLayoutEffect` backed by `huxerui::Lifecycle` |
-| Native host elements | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages` |
+| Native host elements | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Select`, `ComboBox`, `DatePicker`, `TimePicker`, `RefreshBox`, `Pager`, `SplitLayout`, `TopAppBar`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages` |
+| Accessibility | `semantics` prop mapped to HuxerUI `Semantics` (role, label, hint, state, identifier) |
 | Native modifiers | padding, spacing, frame/width/height, background, foreground, border, corner radius, shadow, clip, enabled, focusable, main/cross alignment, align, grow, `onClick` |
 | Event callbacks | `onClick`; pointer down/move/up/cancel/intercept; hover enter/move/leave; scroll; key down/up/intercept; focus/blur; context menu; Back; `onChange`/`onSubmit` on form controls |
 | Host extension | `Runtime::RegisterFunction()`, `Runtime::SetModuleLoader()`, `Runtime::Evaluate()`, `Runtime::Invoke()` |
@@ -285,6 +286,14 @@ for a dev preview but not for an unbounded production hot-update service.
 | `Button` | `Button` | `label` (string or `{ resource }`), or text children; `onClick` |
 | `IconButton` | `IconButton` | `src` (local file or `{ resource }`), `label` |
 | `Image` | `Image` | `src` (local file, `{ file }`, or `{ resource: "domain:key" }`), `fit`, `tint` |
+| `Select` | `Select` | `items`, `selected`, `label`, `validation`, `onChange(index)`, `onExpandedChange(bool)` |
+| `ComboBox` | `ComboBox` | `value`, `suggestions`, `label`, `placeholder`, `maxLength`, `validation`, `onChange`, `onSelect(index, value)`, `onSubmit`, `onExpandedChange` |
+| `DatePicker` | `DatePicker` | `value` / `min` / `max` in `YYYY-MM-DD`, `label`, `validation`, `onChange(string)` |
+| `TimePicker` | `TimePicker` | `value` in `HH:MM`, `step` minutes, `label`, `validation`, `onChange(string)` |
+| `RefreshBox` | `RefreshBox` | one child, `refreshing`, `onRefresh` |
+| `Pager` | `Pager` | children, `selected`, `axis`, `reverse`, `dragEnabled`, `onChange`, `onSettled` |
+| `SplitLayout` | `SplitLayout` | two or more children, `axis`, `onChange(changes)` with frame/grow writeback |
+| `TopAppBar` | `TopAppBar` | `title`, `leading`, `actions`, `titleAlign` |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | shared modifiers |
 | `ScrollView` | `ScrollView` | `axis`, `scrollRef`; multiple children become a `Column` |
@@ -327,6 +336,7 @@ Shared props map one-to-one onto HuxerUI modifiers:
 | `align` | `Align` (`"center"` or `{ horizontal, vertical }`) |
 | `grow` | `Grow` (`true` or a factor) |
 | `tooltip` | `Tooltip` (string message) |
+| `semantics` | `Semantics` (role, label, value, hint, state flags, live region) |
 
 Colors accept `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(...)`, `rgba(...)`, common names,
 `0xRRGGBB`, `[r, g, b, a?]`, or `{ r, g, b, a? }`. Channels are 0–255; alpha is 0–1.
@@ -596,6 +606,10 @@ contained so they cannot mask the original JavaScript failure.
 - Native routed `NavigationStack`, typed routes, page transitions, and serialized history are not
   bridged. TSX provides the `useNavigation()`/`NavigationStack` page stack; animation and canvas
   are not bridged yet.
+- HUI's native `Select`, `ComboBox`, `DatePicker`, and `TimePicker` resolve built-in framework
+  images and strings; the consuming application package must install the HuxerUI resources.
+- Drawer, dock, tree, window title bar, and arbitrary `Canvas`/`VectorAsset` construction are not
+  exposed as TSX tags yet.
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` are declarative callbacks that run during
   virtual measurement; they must not call hooks. Use a function component inside the returned child
   for hook state.

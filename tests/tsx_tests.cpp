@@ -1549,6 +1549,78 @@ void NavigationStackTest() {
   });
 }
 
+void FormComponents() {
+  const char* bundle = R"JS(
+    import {
+      mount, h, Column, Text, RefreshBox, Pager, SplitLayout, TopAppBar,
+    } from "@huxerui/tsx";
+
+    function App() {
+      return h(Column, {padding: 8, spacing: 8},
+        h(TopAppBar, {key: "bar", title: "Components"}),
+        h(RefreshBox, {key: "refresh", refreshing: false},
+          h(Text, {key: "refresh-child"}, "Refresh content")
+        ),
+        h(Pager, {key: "pager", selected: 0},
+          h(Text, {key: "page-1"}, "Page one"),
+          h(Text, {key: "page-2"}, "Page two")
+        ),
+        h(SplitLayout, {key: "split", axis: "horizontal"},
+          h(Text, {key: "pane-1", grow: 1}, "Pane one"),
+          h(Text, {key: "pane-2", grow: 1}, "Pane two")
+        )
+      );
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("form components", bundle, [](testing::UiTest& ui, tsx::Runtime&) {
+    Check(ui.Find(testing::UiSelector::Key("refresh")).Exists(), "RefreshBox should render");
+    Check(ui.Find(testing::UiSelector::Key("pager")).Exists(), "Pager should render");
+    Check(ui.Find(testing::UiSelector::Key("split")).Exists(), "SplitLayout should render");
+    Check(ui.Find(testing::UiSelector::Text("Components")).Exists(),
+          "TopAppBar should render its title");
+    Check(ui.Find(testing::UiSelector::Text("Refresh content")).Exists(),
+          "RefreshBox should render its content");
+    Check(ui.Find(testing::UiSelector::Text("Page one")).Exists(),
+          "Pager should render its selected page");
+    Check(ui.Find(testing::UiSelector::Text("Pane one")).Exists(),
+          "SplitLayout should render its first pane");
+    Check(ui.Find(testing::UiSelector::Text("Pane two")).Exists(),
+          "SplitLayout should render its second pane");
+  });
+}
+
+void SemanticsModifier() {
+  const char* bundle = R"JS(
+    import { mount, h, Text } from "@huxerui/tsx";
+
+    function App() {
+      return h(Text, {
+        key: "semantic-save",
+        semantics: {
+          role: "button",
+          label: "Save changes",
+          hint: "Writes the file",
+          identifier: "save",
+        },
+      }, "Save");
+    }
+
+    mount(h(App));
+  )JS";
+
+  RunCase("semantics modifier", bundle, [](testing::UiTest& ui, tsx::Runtime&) {
+    const auto match = ui.FindSemantics(testing::UiSemanticSelector::AllOf(
+        testing::UiSemanticSelector::Role(SemanticRole::Button),
+        testing::UiSemanticSelector::Label("Save changes"),
+        testing::UiSemanticSelector::Identifier("save")
+    ));
+    Check(match.Exists(), "semantics should publish role, label, and identifier");
+  });
+}
+
 void FetchRejection() {
   const char* bundle = R"JS(
     import {

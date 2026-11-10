@@ -267,6 +267,50 @@ std::optional<VerticalAlignment> ParseVerticalAlign(std::string_view name) {
 
 } // namespace
 
+std::optional<std::pair<std::string, std::string>> ParseResourceId(const quickjs::Value& value) {
+  if (!value.IsObject()) {
+    return std::nullopt;
+  }
+  if (const auto resource = StringProperty(value, "resource")) {
+    const auto separator = resource->find(':');
+    if (separator == std::string::npos || separator == 0 || separator + 1 >= resource->size()) {
+      return std::nullopt;
+    }
+    return std::make_pair(resource->substr(0, separator), resource->substr(separator + 1));
+  }
+  const auto domain = StringProperty(value, "domain");
+  const auto key = StringProperty(value, "key");
+  if (!domain || !key || domain->empty() || key->empty()) {
+    return std::nullopt;
+  }
+  return std::make_pair(*domain, *key);
+}
+
+std::optional<StringVariant> StringVariantFromValue(const quickjs::Value& value) {
+  if (value.IsString()) {
+    const auto text = value.ToString();
+    if (text.Succeeded()) {
+      return StringVariant(text.Value());
+    }
+    return std::nullopt;
+  }
+  if (const auto resource = ParseResourceId(value)) {
+    return StringVariant(StringResource(resource->first, resource->second));
+  }
+  return std::nullopt;
+}
+
+std::optional<StringVariant> StringVariantProperty(
+    const quickjs::Value& props,
+    std::string_view name
+) {
+  const auto value = Property(props, name);
+  if (!value) {
+    return std::nullopt;
+  }
+  return StringVariantFromValue(*value);
+}
+
 std::optional<quickjs::Value> Property(const quickjs::Value& object, std::string_view name) {
   if (!object.IsObject()) {
     return std::nullopt;
@@ -502,6 +546,169 @@ void ApplyKey(View& view, const quickjs::Value& node) {
   }
 }
 
+std::optional<Semantics> SemanticsFromProps(const quickjs::Value& props) {
+  const auto object = Property(props, "semantics");
+  if (!object || !object->IsObject()) {
+    return std::nullopt;
+  }
+  Semantics semantics;
+  if (const auto role = StringProperty(*object, "role")) {
+    const auto name = Lowercase(*role);
+    if (name == "generic") {
+      semantics.role = SemanticRole::Generic;
+    } else if (name == "text") {
+      semantics.role = SemanticRole::Text;
+    } else if (name == "heading") {
+      semantics.role = SemanticRole::Heading;
+    } else if (name == "image") {
+      semantics.role = SemanticRole::Image;
+    } else if (name == "button") {
+      semantics.role = SemanticRole::Button;
+    } else if (name == "link") {
+      semantics.role = SemanticRole::Link;
+    } else if (name == "checkbox") {
+      semantics.role = SemanticRole::Checkbox;
+    } else if (name == "radio" || name == "radiobutton") {
+      semantics.role = SemanticRole::RadioButton;
+    } else if (name == "switch") {
+      semantics.role = SemanticRole::Switch;
+    } else if (name == "slider") {
+      semantics.role = SemanticRole::Slider;
+    } else if (name == "progress" || name == "progressindicator") {
+      semantics.role = SemanticRole::ProgressIndicator;
+    } else if (name == "combobox") {
+      semantics.role = SemanticRole::ComboBox;
+    } else if (name == "textfield" || name == "textbox") {
+      semantics.role = SemanticRole::TextField;
+    } else if (name == "searchfield" || name == "search") {
+      semantics.role = SemanticRole::SearchField;
+    } else if (name == "tab") {
+      semantics.role = SemanticRole::Tab;
+    } else if (name == "tablist") {
+      semantics.role = SemanticRole::TabList;
+    } else if (name == "menu") {
+      semantics.role = SemanticRole::Menu;
+    } else if (name == "menuitem") {
+      semantics.role = SemanticRole::MenuItem;
+    } else if (name == "dialog") {
+      semantics.role = SemanticRole::Dialog;
+    } else if (name == "navigation") {
+      semantics.role = SemanticRole::Navigation;
+    } else if (name == "list") {
+      semantics.role = SemanticRole::List;
+    } else if (name == "listitem") {
+      semantics.role = SemanticRole::ListItem;
+    } else if (name == "grid") {
+      semantics.role = SemanticRole::Grid;
+    } else if (name == "gridcell") {
+      semantics.role = SemanticRole::GridCell;
+    } else if (name == "scrollview") {
+      semantics.role = SemanticRole::ScrollView;
+    } else if (name == "tree") {
+      semantics.role = SemanticRole::Tree;
+    } else if (name == "treeitem") {
+      semantics.role = SemanticRole::TreeItem;
+    } else if (name == "separator") {
+      semantics.role = SemanticRole::Separator;
+    }
+  }
+  const auto variant = [&object](const char* name) -> std::optional<StringVariant> {
+    const auto value = Property(*object, name);
+    return value ? StringVariantFromValue(*value) : std::nullopt;
+  };
+  if (auto label = variant("label")) {
+    semantics.label = std::move(*label);
+  }
+  if (auto value = variant("value")) {
+    semantics.value = std::move(*value);
+  }
+  if (auto placeholder = variant("placeholder")) {
+    semantics.placeholder = std::move(*placeholder);
+  }
+  if (auto hint = variant("hint")) {
+    semantics.hint = std::move(*hint);
+  }
+  if (auto error = variant("error")) {
+    semantics.error = std::move(*error);
+  }
+  if (auto description = variant("stateDescription")) {
+    semantics.state_description = std::move(*description);
+  }
+  if (const auto identifier = StringProperty(*object, "identifier")) {
+    semantics.identifier = *identifier;
+  }
+  if (const auto checked = Property(*object, "checked")) {
+    if (checked->IsBoolean()) {
+      const auto value = checked->ToBoolean();
+      if (value.Succeeded()) {
+        semantics.checked = value.Value() ? SemanticCheckedState::Checked
+                                          : SemanticCheckedState::Unchecked;
+      }
+    } else if (const auto name = checked->ToString(); name.Succeeded()) {
+      const auto normalized = Lowercase(name.Value());
+      if (normalized == "mixed") {
+        semantics.checked = SemanticCheckedState::Mixed;
+      } else if (normalized == "checked") {
+        semantics.checked = SemanticCheckedState::Checked;
+      } else if (normalized == "unchecked") {
+        semantics.checked = SemanticCheckedState::Unchecked;
+      }
+    }
+  }
+  const auto boolean = [&object](const char* name) -> std::optional<bool> {
+    const auto value = Property(*object, name);
+    if (!value) {
+      return std::nullopt;
+    }
+    const auto result = value->ToBoolean();
+    return result.Succeeded() ? std::optional<bool>(result.Value()) : std::nullopt;
+  };
+  if (const auto selected = boolean("selected")) {
+    semantics.selected = *selected;
+  }
+  if (const auto expanded = boolean("expanded")) {
+    semantics.expanded = *expanded;
+  }
+  if (const auto busy = boolean("busy")) {
+    semantics.busy = *busy;
+  }
+  if (const auto read_only = boolean("readOnly")) {
+    semantics.read_only = *read_only;
+  }
+  if (const auto required = boolean("required")) {
+    semantics.required = *required;
+  }
+  if (const auto invalid = boolean("invalid")) {
+    semantics.invalid = *invalid;
+  }
+  if (const auto hidden = boolean("hidden")) {
+    semantics.hidden = *hidden;
+  }
+  if (const auto level = NumberProperty(*object, "headingLevel");
+      level && *level >= 1.0 && *level <= 6.0) {
+    semantics.heading_level = static_cast<unsigned int>(*level);
+  }
+  if (const auto descendants = StringProperty(*object, "descendants")) {
+    const auto name = Lowercase(*descendants);
+    if (name == "exclude") {
+      semantics.descendants = SemanticDescendantPolicy::Exclude;
+    } else if (name == "preserve") {
+      semantics.descendants = SemanticDescendantPolicy::Preserve;
+    }
+  }
+  if (const auto live = StringProperty(*object, "liveRegion")) {
+    const auto name = Lowercase(*live);
+    if (name == "polite") {
+      semantics.live_region = SemanticLiveRegion::Polite;
+    } else if (name == "assertive") {
+      semantics.live_region = SemanticLiveRegion::Assertive;
+    } else if (name == "none") {
+      semantics.live_region = SemanticLiveRegion::None;
+    }
+  }
+  return semantics;
+}
+
 View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& props) {
   if (const auto spacing = NumberProperty(props, "spacing")) {
     view = AddModifier(std::move(view), Spacing(static_cast<float>(*spacing)));
@@ -685,6 +892,9 @@ View ApplyCommonProps(RuntimeImpl& runtime, View view, const quickjs::Value& pro
   }
   if (const auto value = Property(props, "textAlign")) {
     (void)value; // Text consumes this property itself; ignore on other elements.
+  }
+  if (const auto semantics = SemanticsFromProps(props)) {
+    view = std::move(view).With(*semantics);
   }
   if (const auto tooltip = StringProperty(props, "tooltip"); tooltip && !tooltip->empty()) {
     view = std::move(view).With(huxerui::Tooltip(*tooltip));

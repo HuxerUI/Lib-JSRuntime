@@ -45,7 +45,8 @@ App.tsx ──esbuild──▶ app.js (ES module) ──QuickJS──▶ VNode t
 | 渲染进 HuxerUI 应用 | `Runtime::Root()`, `tsx::TsxRoot(Runtime&)` |
 | 函数组件与稳定的位置式 state | `useState`, `useReducer`, `useRef`, `useMemo`, `useCallback` |
 | commit 阶段 effect 与清理 | `useEffect`, `useLayoutEffect`，由 `huxerui::Lifecycle` 支撑 |
-| 原生宿主元素 | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages` |
+| 原生宿主元素 | `Column`, `Row`, `Flow`, `Stack`, `Theme`, `Text`, `Button`, `IconButton`, `Image`, `Select`, `ComboBox`, `DatePicker`, `TimePicker`, `RefreshBox`, `Pager`, `SplitLayout`, `TopAppBar`, `Divider`, `Spacer`, `ScrollView`, `SelectionArea`, `TextField`, `Checkbox`, `RadioButton`, `Switch`, `Slider`, `ProgressBar`, `ProgressCircle`, `Chip`, `VirtualList`, `VirtualGrid`, `Tabs`, `SegmentedButton`, `NavigationPane`, `NavigationBar`, `IndexedPages` |
+| 无障碍 | `semantics` prop 映射到 HuxerUI `Semantics`（role、label、hint、state、identifier） |
 | 原生修饰符 | padding、spacing、frame/width/height、background、foreground、border、corner radius、shadow、clip、enabled、focusable、main/cross alignment、align、grow、`onClick` |
 | 事件回调 | `onClick`；pointer down/move/up/cancel/intercept；hover enter/move/leave；scroll；key down/up/intercept；focus/blur；context menu；Back；表单控件的 `onChange`/`onSubmit` |
 | 宿主扩展 | `Runtime::RegisterFunction()`, `Runtime::SetModuleLoader()`, `Runtime::Evaluate()`, `Runtime::Invoke()` |
@@ -279,6 +280,14 @@ preview 可接受，但不适合无界的生产热更新服务。
 | `Button` | `Button` | `label`（字符串或 `{ resource }`）或文本 children；`onClick` |
 | `IconButton` | `IconButton` | `src`（本地文件或 `{ resource }`）, `label` |
 | `Image` | `Image` | `src`（本地文件、`{ file }` 或 `{ resource: "domain:key" }`）, `fit`, `tint` |
+| `Select` | `Select` | `items`, `selected`, `label`, `validation`, `onChange(index)`, `onExpandedChange(bool)` |
+| `ComboBox` | `ComboBox` | `value`, `suggestions`, `label`, `placeholder`, `maxLength`, `validation`, `onChange`, `onSelect(index, value)`, `onSubmit`, `onExpandedChange` |
+| `DatePicker` | `DatePicker` | `value` / `min` / `max`（`YYYY-MM-DD`）, `label`, `validation`, `onChange(string)` |
+| `TimePicker` | `TimePicker` | `value`（`HH:MM`）, `step` 分钟, `label`, `validation`, `onChange(string)` |
+| `RefreshBox` | `RefreshBox` | 一个 child, `refreshing`, `onRefresh` |
+| `Pager` | `Pager` | children, `selected`, `axis`, `reverse`, `dragEnabled`, `onChange`, `onSettled` |
+| `SplitLayout` | `SplitLayout` | 两个及以上 children, `axis`, `onChange(changes)`（回写 frame/grow） |
+| `TopAppBar` | `TopAppBar` | `title`, `leading`, `actions`, `titleAlign` |
 | `Divider` | `Divider` | `axis` |
 | `Spacer` | `Spacer` | 共享修饰符 |
 | `ScrollView` | `ScrollView` | `axis`, `scrollRef`；多个 child 会变成 `Column` |
@@ -321,6 +330,7 @@ preview 可接受，但不适合无界的生产热更新服务。
 | `align` | `Align`（`"center"` 或 `{ horizontal, vertical }`） |
 | `grow` | `Grow`（`true` 或一个系数） |
 | `tooltip` | `Tooltip`（字符串消息） |
+| `semantics` | `Semantics`（role、label、value、hint、状态标志、live region） |
 
 颜色接受 `#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb(...)`、`rgba(...)`、常见颜色名、
 `0xRRGGBB`、`[r, g, b, a?]` 或 `{ r, g, b, a? }`。通道范围 0–255；alpha 范围 0–1。
@@ -582,6 +592,9 @@ bundle 位置。没有 source map 时，映射字段等于生成字段。`descri
 - 图片解析本地文件和打包图片资源 key；TSX props 不暴露原始 SVG 文本、网络 URL 和任意程序化矢量构建。
 - 原生 routed `NavigationStack`、typed route、页面转场和可序列化 history 尚未桥接。TSX 提供
   `useNavigation()`/`NavigationStack` 页面栈；动画和 canvas 尚未桥接。
+- HUI 原生 `Select`、`ComboBox`、`DatePicker`、`TimePicker` 会解析框架内置图片和字符串；
+  消费应用需要安装 HuxerUI 资源包。
+- Drawer、dock、tree、window title bar 以及任意 `Canvas`/`VectorAsset` 构建尚未暴露为 TSX 标签。
 - `VirtualList::renderItem` / `VirtualGrid::renderItem` 是在虚拟测量期间运行的声明式
   回调；它们不能调用 hooks。需要 hook state 时，在返回的 child 里使用函数组件。
 - runtime 拥有 JavaScript context。它必须比它产生的每个 `View` 活得久；应用挂载期间不要

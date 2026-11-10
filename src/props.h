@@ -4,11 +4,13 @@
 #include <huxerui/gesture.h>
 #include <huxerui/geometry.h>
 #include <huxerui/quickjs.h>
+#include <huxerui/resource.h>
 #include <huxerui/view.h>
 
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "internal.h"
 
@@ -19,6 +21,17 @@ namespace huxerui::tsx::detail {
 [[nodiscard]] std::optional<double> NumberProperty(const quickjs::Value& object, std::string_view name);
 [[nodiscard]] std::optional<bool> BoolProperty(const quickjs::Value& object, std::string_view name);
 [[nodiscard]] std::optional<std::string> StringProperty(const quickjs::Value& object, std::string_view name);
+
+/// Parses a packaged resource identity from `"domain:key"` or `{ domain, key }`.
+[[nodiscard]] std::optional<std::pair<std::string, std::string>> ParseResourceId(
+    const quickjs::Value& value
+);
+/// Accepts literal text or a packaged string resource value.
+[[nodiscard]] std::optional<StringVariant> StringVariantFromValue(const quickjs::Value& value);
+[[nodiscard]] std::optional<StringVariant> StringVariantProperty(
+    const quickjs::Value& props,
+    std::string_view name
+);
 
 /// Flattens primitive text children; non-text nodes contribute nothing.
 [[nodiscard]] std::string TextContent(const quickjs::Value& value);

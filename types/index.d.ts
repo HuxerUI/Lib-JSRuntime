@@ -164,6 +164,32 @@ export interface MultiTapInputEvent extends LongPressInputEvent {
   count: number;
 }
 
+export interface SemanticsSpec {
+  role?: "generic" | "text" | "heading" | "image" | "button" | "link" | "checkbox"
+    | "radioButton" | "switch" | "slider" | "progressIndicator" | "comboBox" | "textField"
+    | "searchField" | "tab" | "tabList" | "menu" | "menuItem" | "dialog" | "navigation"
+    | "list" | "listItem" | "grid" | "gridCell" | "scrollView" | "tree" | "treeItem"
+    | "separator";
+  label?: TextValue;
+  value?: TextValue;
+  placeholder?: TextValue;
+  hint?: TextValue;
+  error?: TextValue;
+  stateDescription?: TextValue;
+  identifier?: string;
+  checked?: boolean | "checked" | "unchecked" | "mixed";
+  selected?: boolean;
+  expanded?: boolean;
+  busy?: boolean;
+  readOnly?: boolean;
+  required?: boolean;
+  invalid?: boolean;
+  headingLevel?: number;
+  descendants?: "preserve" | "exclude";
+  liveRegion?: "none" | "polite" | "assertive";
+  hidden?: boolean;
+}
+
 export interface CommonProps {
   key?: Key;
   children?: Child;
@@ -226,6 +252,8 @@ export interface CommonProps {
   popupAnchor?: PopupRef;
   /** Anchors a useMenu() to this host element. */
   menuAnchor?: MenuRef;
+  /** Native accessibility metadata applied to this view. */
+  semantics?: SemanticsSpec;
   /** Native focus target; bind to one focusable host element. */
   ref?: FocusRef;
   /** Alias for `ref`. */
@@ -289,6 +317,80 @@ export interface ImageProps extends CommonProps {
 
 export interface DividerProps extends CommonProps {
   axis?: "horizontal" | "vertical";
+}
+
+export interface SelectProps extends CommonProps {
+  items: readonly Child[];
+  selected?: number;
+  label?: TextValue;
+  validation?: ValidationSpec;
+  onChange?: (index: number) => void;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+export interface ComboBoxProps extends CommonProps {
+  value?: string;
+  suggestions: readonly string[];
+  label?: TextValue;
+  placeholder?: TextValue;
+  maxLength?: number;
+  validation?: ValidationSpec;
+  onChange?: (value: string) => void;
+  onSelect?: (index: number, value: string) => void;
+  onSubmit?: () => void;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+export interface DatePickerProps extends CommonProps {
+  /** Controlled date in YYYY-MM-DD form. */
+  value: string;
+  min?: string;
+  max?: string;
+  label?: TextValue;
+  validation?: ValidationSpec;
+  onChange?: (value: string) => void;
+}
+
+export interface TimePickerProps extends CommonProps {
+  /** Controlled local time in HH:MM form. */
+  value: string;
+  /** Selectable minute interval. */
+  step?: number;
+  label?: TextValue;
+  validation?: ValidationSpec;
+  onChange?: (value: string) => void;
+}
+
+export interface RefreshBoxProps extends CommonProps {
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}
+
+export interface PagerProps extends CommonProps {
+  selected?: number;
+  axis?: "horizontal" | "vertical";
+  reverse?: boolean;
+  dragEnabled?: boolean;
+  onChange?: (index: number) => void;
+  onSettled?: (index: number) => void;
+}
+
+export interface SplitChangeSpec {
+  index: number;
+  grow: number;
+  frame?: FrameSpec;
+}
+
+export interface SplitLayoutProps extends CommonProps {
+  axis?: "horizontal" | "vertical";
+  onChange?: (changes: readonly SplitChangeSpec[]) => void;
+}
+
+export interface TopAppBarProps extends CommonProps {
+  title?: TextValue;
+  leading?: Child;
+  actions?: readonly Child[];
+  titleAlign?: "start" | "center";
 }
 
 export type ScrollAlignment = "start" | "center" | "end";
@@ -460,6 +562,14 @@ export const Text: HostComponent<TextProps>;
 export const Button: HostComponent<ButtonProps>;
 export const IconButton: HostComponent<IconButtonProps>;
 export const Image: HostComponent<ImageProps>;
+export const Select: HostComponent<SelectProps>;
+export const ComboBox: HostComponent<ComboBoxProps>;
+export const DatePicker: HostComponent<DatePickerProps>;
+export const TimePicker: HostComponent<TimePickerProps>;
+export const RefreshBox: HostComponent<RefreshBoxProps>;
+export const Pager: HostComponent<PagerProps>;
+export const SplitLayout: HostComponent<SplitLayoutProps>;
+export const TopAppBar: HostComponent<TopAppBarProps>;
 export const Divider: HostComponent<DividerProps>;
 export const Spacer: HostComponent<CommonProps>;
 export const ScrollView: HostComponent<ScrollViewProps>;
