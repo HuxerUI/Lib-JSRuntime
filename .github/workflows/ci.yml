@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 env:
-  # Official HuxerUI 0.4.0 (main branch commit; no v0.4.0 tag yet).
+  # Official HuxerUI v0.5.5.
   HUXERUI_REPOSITORY: HuxerUI/HuxerUI
-  HUXERUI_REVISION: 36f93958ea368c38d9361cc7dc2c2cbe3a4b5892
+  HUXERUI_REVISION: c88611d4c83b1e1484a3697624a99e9e31aafd56
 
 jobs:
   esbuild:

@@ -65,9 +65,11 @@ State<JsSlot> AcquireSlotState(quickjs::Value initial) {
   return AcquireStateCell(JsSlot{std::move(initial)});
 }
 
-huxerui::FocusRequester AcquireFocusRequester() {
-  const auto acquire = &huxerui::UseFocusRequester;
-  return acquire(std::source_location::current());
+huxerui::ViewHandle AcquireViewHandle(
+    std::source_location location = std::source_location::current()
+) {
+  const auto acquire = &huxerui::UseViewHandle;
+  return acquire(location);
 }
 
 huxerui::ScrollController AcquireScrollController(float initial_offset) {
@@ -689,7 +691,7 @@ View RuntimeImpl::ApplyMenuAnchor(View view, const quickjs::Value& props) {
   if (found == menu_handles_.end()) {
     return view;
   }
-  return std::move(view).With(found->second.Anchor());
+  return std::move(view).With(found->second.anchor);
 }
 
 View RuntimeImpl::ApplyPopupAnchor(View view, const quickjs::Value& props) {
@@ -705,7 +707,7 @@ View RuntimeImpl::ApplyPopupAnchor(View view, const quickjs::Value& props) {
   if (found == popup_handles_.end()) {
     return view;
   }
-  return std::move(view).With(found->second.Anchor());
+  return std::move(view).With(found->second.anchor);
 }
 
 View RuntimeImpl::ApplyFocusRef(View view, const quickjs::Value& props) {
@@ -722,7 +724,7 @@ View RuntimeImpl::ApplyFocusRef(View view, const quickjs::Value& props) {
   if (found == focus_requesters_.end()) {
     return view;
   }
-  return std::move(view).With(FocusTarget{found->second});
+  return std::move(view).With(found->second);
 }
 
 std::string RuntimeImpl::ComponentPath(const ComponentInstance& instance) const {
@@ -1066,9 +1068,9 @@ quickjs::Value RuntimeImpl::HostUseFocusRequester(
     std::span<const quickjs::Value> arguments
 ) {
   (void)arguments;
-  auto requester = AcquireFocusRequester();
+  auto requester = AcquireViewHandle();
   const auto id = next_focus_requester_id_++;
-  focus_requesters_.emplace(id, requester);
+  focus_requesters_.emplace(id, std::move(requester));
   return owner.Number(static_cast<double>(id));
 }
 
@@ -1434,8 +1436,12 @@ quickjs::Value RuntimeImpl::HostUseMenu(
 ) {
   (void)arguments;
   auto handle = AcquireMenuHandle();
+  auto anchor = AcquireViewHandle();
   const auto id = next_menu_handle_id_++;
-  menu_handles_.emplace(id, std::move(handle));
+  menu_handles_.emplace(
+      id,
+      BoundMenuHandle{std::move(handle), std::move(anchor)}
+  );
   return owner.Number(static_cast<double>(id));
 }
 
@@ -1463,7 +1469,7 @@ quickjs::Value RuntimeImpl::HostShowMenu(
     return owner.Number(0.0);
   }
 
-  const auto id = found->second.ShowAt(
+  const auto id = found->second.handle.ShowAt(
       Point{static_cast<float>(x.Value()), static_cast<float>(y.Value())},
       std::move(entries)
   );
@@ -1489,7 +1495,7 @@ quickjs::Value RuntimeImpl::HostShowMenuAnchored(
   if (entries.empty()) {
     return owner.Number(0.0);
   }
-  const auto id = found->second.Show(std::move(entries));
+  const auto id = found->second.handle.Show(found->second.anchor, std::move(entries));
   return owner.Number(static_cast<double>(id));
 }
 
@@ -1511,7 +1517,7 @@ quickjs::Value RuntimeImpl::HostDismissMenu(
     return owner.Boolean(false);
   }
   return owner.Boolean(
-      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+      found->second.handle.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
   );
 }
 
@@ -1685,8 +1691,12 @@ quickjs::Value RuntimeImpl::HostUsePopup(
 ) {
   (void)arguments;
   auto handle = AcquirePopupHandle();
+  auto anchor = AcquireViewHandle();
   const auto id = next_popup_handle_id_++;
-  popup_handles_.emplace(id, std::move(handle));
+  popup_handles_.emplace(
+      id,
+      BoundPopupHandle{std::move(handle), std::move(anchor)}
+  );
   return owner.Number(static_cast<double>(id));
 }
 
@@ -1736,7 +1746,11 @@ quickjs::Value RuntimeImpl::HostShowPopup(
     }
     return impl->RenderValue(rendered.Value());
   };
-  const auto id = found->second.Show(std::move(content), std::move(popup_options));
+  const auto id = found->second.handle.Show(
+      found->second.anchor,
+      std::move(content),
+      std::move(popup_options)
+  );
   return owner.Number(static_cast<double>(id));
 }
 
@@ -1758,7 +1772,7 @@ quickjs::Value RuntimeImpl::HostDismissPopup(
     return owner.Boolean(false);
   }
   return owner.Boolean(
-      found->second.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
+      found->second.handle.Dismiss(static_cast<huxerui::LayerId>(layer_id.Value()))
   );
 }
 

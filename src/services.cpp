@@ -109,7 +109,7 @@ quickjs::Value RuntimeImpl::HostClipboardRead(
   try {
     const auto application = huxerui::UseApplication();
     const auto clipboard = application.Clipboard();
-    if (!clipboard || !clipboard->IsAvailable()) {
+    if (!clipboard || !clipboard->SupportsSynchronousText()) {
       return owner.Null();
     }
     const auto text = clipboard->ReadText();
@@ -137,7 +137,7 @@ quickjs::Value RuntimeImpl::HostClipboardWrite(
   try {
     const auto application = huxerui::UseApplication();
     const auto clipboard = application.Clipboard();
-    if (!clipboard || !clipboard->IsAvailable()) {
+    if (!clipboard || !clipboard->SupportsSynchronousText()) {
       return owner.Boolean(false);
     }
     return owner.Boolean(clipboard->WriteText(text.Value()));
@@ -153,7 +153,7 @@ quickjs::Value RuntimeImpl::HostClipboardAvailable(
   try {
     const auto application = huxerui::UseApplication();
     const auto clipboard = application.Clipboard();
-    return owner.Boolean(clipboard && clipboard->IsAvailable());
+    return owner.Boolean(clipboard && clipboard->SupportsSynchronousText());
   } catch (...) {
     return owner.Boolean(false);
   }
