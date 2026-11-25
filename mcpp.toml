@@ -1,0 +1,50 @@
+[package]
+namespace   = "huxerui"
+name        = "jsruntime"
+version     = "0.1.0"
+standard    = "c++23"
+description = "TSX and QuickJS JavaScript runtime bridge for HuxerUI"
+license     = "MIT"
+repo        = "https://github.com/HuxerUI/Lib-JSRuntime"
+
+[package.metadata.huxerui]
+library   = "HuxerUI::JSRuntime"
+name      = "jsruntime"
+id        = "org.huxerui.jsruntime"
+namespace = "huxerui::tsx"
+
+[dependencies]
+huxerui.huxerui = "0.5.5"
+
+[targets.huxerui_tsx]
+kind = "lib"
+
+[lib]
+path = "modules/jsruntime.cppm"
+
+[build]
+# src/*.cpp is registered by huxerui::rules::configure({}).
+# QuickJS wrapper C++ sources and vendored QuickJS C11 engine sources live outside src/.
+sources = [
+    "quickjs/src/context.cpp",
+    "quickjs/src/error.cpp",
+    "quickjs/src/runtime.cpp",
+    "quickjs/src/value.cpp",
+    "quickjs/third_party/quickjs/quickjs.c",
+    "quickjs/third_party/quickjs/dtoa.c",
+    "quickjs/third_party/quickjs/libregexp.c",
+    "quickjs/third_party/quickjs/libunicode.c",
+]
+include_dirs         = ["include", "quickjs/include", "src", "quickjs/src", "quickjs/third_party/quickjs"]
+private_include_dirs = ["src", "quickjs/src", "quickjs/third_party/quickjs"]
+c_standard           = "c11"
+cflags               = ["-std=gnu11", "-funsigned-char", "-D_GNU_SOURCE", "-w"]
+
+[target.'cfg(all(os = "linux", not(env = "android")))'.runtime]
+libraries = ["dl", "m"]
+
+[target.'cfg(env = "android")'.runtime]
+libraries = ["dl", "m"]
+
+[target.windows.build]
+defines = ["WIN32_LEAN_AND_MEAN", "_WIN32_WINNT=0x0601"]
