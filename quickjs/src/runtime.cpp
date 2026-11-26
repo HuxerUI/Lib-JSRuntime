@@ -62,7 +62,7 @@ Runtime::Runtime(RuntimeOptions options) {
   else {
     // Windows defaults to a 1 MiB thread stack, which matches QuickJS's
     // 1 MiB JS_DEFAULT_STACK_SIZE and can hit the OS guard page before
-    // QuickJS raises RangeError. Use a safe 512 KiB default unless overridden.
+    // QuickJS raises RangeError. Apply a 512 KiB limit unless overridden.
     JS_SetMaxStackSize(state->runtime, 512 * 1024);
   }
 #endif
