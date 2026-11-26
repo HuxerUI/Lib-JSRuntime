@@ -1,12 +1,17 @@
 include_guard(GLOBAL)
 
 # Optional explicit esbuild binary. When empty, huxerui_tsx_bundle() checks
-# HUXERUI_ESBUILD, PATH, then the platform binary vendored under
-# third_party/esbuild/.
+# HUXERUI_ESBUILD, PATH, then a local third_party/esbuild/ override, or downloads
+# and SHA256-verifies the pinned @esbuild/<platform>@0.25.0 binary on demand.
 set(HUXERUI_TSX_ESBUILD "" CACHE FILEPATH
-        "esbuild binary used to bundle TSX (defaults to the vendored binary)")
+        "esbuild binary used to bundle TSX (downloaded on demand when unset)")
 set(HUXERUI_TSX_ESBUILD_PLATFORM "" CACHE STRING
-        "Override the vendored esbuild platform id (for example linux-arm64)")
+        "Override the esbuild platform id (for example linux-arm64)")
+set(HUXERUI_TSX_ESBUILD_BASE_URL "https://registry.npmjs.org" CACHE STRING
+        "Base npm registry URL for on-demand @esbuild/<platform>@0.25.0 downloads")
+set(HUXERUI_TSX_ESBUILD_CACHE_DIR "" CACHE PATH
+        "Cache directory for downloaded esbuild binaries (defaults to CMAKE_BINARY_DIR/.huxerui-esbuild)")
+set(_HUXERUI_TSX_ESBUILD_VERSION "0.25.0")
 
 # Maps the build host to the vendored esbuild package name.
 function(_huxerui_tsx_host_platform out)
@@ -93,21 +98,161 @@ function(_huxerui_tsx_host_platform out)
     endif ()
 endfunction()
 
-# Returns the vendored esbuild path for the build host, or an empty string.
+# Looks up the pinned SHA256 digest for `triplet` in third_party/esbuild/SHA256SUMS.
+function(_huxerui_tsx_esbuild_sha256 triplet out)
+    set(sums_file "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/esbuild/SHA256SUMS")
+    if (NOT EXISTS "${sums_file}" OR NOT triplet)
+        set("${out}" "" PARENT_SCOPE)
+        return()
+    endif ()
+
+    set(suffix "")
+    if (triplet MATCHES "^win32-")
+        set(suffix ".exe")
+    endif ()
+
+    file(STRINGS "${sums_file}" sum_lines)
+    set(found "")
+    foreach (line IN LISTS sum_lines)
+        if (line MATCHES "^([0-9a-fA-F][0-9a-fA-F]+)[ \t]+\\./${triplet}/esbuild${suffix}$")
+            string(LENGTH "${CMAKE_MATCH_1}" digest_len)
+            if (digest_len EQUAL 64)
+                string(TOLOWER "${CMAKE_MATCH_1}" found)
+                break()
+            endif ()
+        endif ()
+    endforeach ()
+    set("${out}" "${found}" PARENT_SCOPE)
+endfunction()
+
+# Downloads, extracts, and SHA256-verifies the pinned @esbuild/<triplet>@0.25.0 binary.
+function(_huxerui_tsx_fetch_esbuild triplet out)
+    _huxerui_tsx_esbuild_sha256("${triplet}" expected_sha256)
+    if (NOT expected_sha256)
+        set("${out}" "" PARENT_SCOPE)
+        return()
+    endif ()
+
+    set(suffix "")
+    if (triplet MATCHES "^win32-")
+        set(suffix ".exe")
+    endif ()
+
+    set(cache_root "${HUXERUI_TSX_ESBUILD_CACHE_DIR}")
+    if (NOT cache_root AND DEFINED ENV{HUXERUI_ESBUILD_CACHE_DIR})
+        set(cache_root "$ENV{HUXERUI_ESBUILD_CACHE_DIR}")
+    endif ()
+    if (NOT cache_root)
+        set(cache_root "${CMAKE_BINARY_DIR}/.huxerui-esbuild")
+    endif ()
+    get_filename_component(cache_root "${cache_root}" ABSOLUTE)
+
+    set(cached_dir "${cache_root}/${_HUXERUI_TSX_ESBUILD_VERSION}/${triplet}")
+    set(cached_bin "${cached_dir}/esbuild${suffix}")
+    if (EXISTS "${cached_bin}")
+        file(SHA256 "${cached_bin}" actual_sha256)
+        if (actual_sha256 STREQUAL expected_sha256)
+            if (NOT CMAKE_HOST_WIN32)
+                file(CHMOD "${cached_bin}"
+                        PERMISSIONS
+                        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE
+                        WORLD_READ WORLD_EXECUTE)
+            endif ()
+            set("${out}" "${cached_bin}" PARENT_SCOPE)
+            return()
+        endif ()
+        file(REMOVE "${cached_bin}")
+    endif ()
+
+    set(base_url "${HUXERUI_TSX_ESBUILD_BASE_URL}")
+    string(REGEX REPLACE "/+$" "" base_url "${base_url}")
+    set(package_url
+            "${base_url}/@esbuild/${triplet}/-/${triplet}-${_HUXERUI_TSX_ESBUILD_VERSION}.tgz")
+
+    set(stage_dir "${cache_root}/${_HUXERUI_TSX_ESBUILD_VERSION}/.staging-${triplet}")
+    file(REMOVE_RECURSE "${stage_dir}")
+    file(MAKE_DIRECTORY "${stage_dir}/extract")
+    set(tarball "${stage_dir}/${triplet}-${_HUXERUI_TSX_ESBUILD_VERSION}.tgz")
+
+    message(STATUS
+            "HuxerUI TSX: downloading pinned esbuild ${_HUXERUI_TSX_ESBUILD_VERSION} (${triplet}) from ${package_url}")
+    file(DOWNLOAD
+            "${package_url}"
+            "${tarball}"
+            STATUS download_status
+            TLS_VERIFY ON
+    )
+    list(GET download_status 0 download_code)
+    if (NOT download_code EQUAL 0)
+        list(GET download_status 1 download_message)
+        file(REMOVE_RECURSE "${stage_dir}")
+        message(FATAL_ERROR
+                "Failed to download esbuild ${_HUXERUI_TSX_ESBUILD_VERSION} for ${triplet} "
+                "from ${package_url} (${download_message}). Provide -DHUXERUI_TSX_ESBUILD=/path/to/esbuild, "
+                "override HUXERUI_TSX_ESBUILD_BASE_URL, or pre-populate "
+                "third_party/esbuild/${triplet}/esbuild${suffix}.")
+    endif ()
+
+    file(ARCHIVE_EXTRACT
+            INPUT "${tarball}"
+            DESTINATION "${stage_dir}/extract"
+    )
+
+    if (triplet MATCHES "^win32-")
+        set(extracted_bin "${stage_dir}/extract/package/esbuild.exe")
+    else ()
+        set(extracted_bin "${stage_dir}/extract/package/bin/esbuild")
+    endif ()
+    if (NOT EXISTS "${extracted_bin}")
+        file(REMOVE_RECURSE "${stage_dir}")
+        message(FATAL_ERROR
+                "Downloaded @esbuild/${triplet}@${_HUXERUI_TSX_ESBUILD_VERSION} archive did not contain "
+                "the expected binary for ${triplet}.")
+    endif ()
+
+    file(SHA256 "${extracted_bin}" actual_sha256)
+    if (NOT actual_sha256 STREQUAL expected_sha256)
+        file(REMOVE_RECURSE "${stage_dir}")
+        message(FATAL_ERROR
+                "SHA256 mismatch for downloaded esbuild (${triplet}): expected ${expected_sha256}, "
+                "got ${actual_sha256}.")
+    endif ()
+
+    file(MAKE_DIRECTORY "${cached_dir}")
+    configure_file("${extracted_bin}" "${cached_bin}" COPYONLY)
+    if (NOT CMAKE_HOST_WIN32)
+        file(CHMOD "${cached_bin}"
+                PERMISSIONS
+                OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                GROUP_READ GROUP_EXECUTE
+                WORLD_READ WORLD_EXECUTE)
+    endif ()
+    file(REMOVE_RECURSE "${stage_dir}")
+    set("${out}" "${cached_bin}" PARENT_SCOPE)
+endfunction()
+
+# Returns a local or cached/downloaded esbuild path for the target host triplet, or empty string.
 function(_huxerui_tsx_vendored_esbuild out)
     set(root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../third_party/esbuild")
     _huxerui_tsx_host_platform(triplet)
+    if (NOT triplet)
+        set("${out}" "" PARENT_SCOPE)
+        return()
+    endif ()
 
     set(suffix "")
-    if (CMAKE_HOST_WIN32)
+    if (triplet MATCHES "^win32-")
         set(suffix ".exe")
     endif ()
     set(candidate "${root}/${triplet}/esbuild${suffix}")
-    if (triplet AND EXISTS "${candidate}")
+    if (EXISTS "${candidate}")
         set("${out}" "${candidate}" PARENT_SCOPE)
-    else ()
-        set("${out}" "" PARENT_SCOPE)
+        return()
     endif ()
+
+    _huxerui_tsx_fetch_esbuild("${triplet}" fetched)
+    set("${out}" "${fetched}" PARENT_SCOPE)
 endfunction()
 
 # Bundles one TSX entry with esbuild into the ES module consumed by
@@ -145,6 +290,9 @@ function(huxerui_tsx_bundle output)
     if (NOT HUXERUI_TSX_ESBUILD_BIN AND DEFINED ENV{HUXERUI_ESBUILD})
         set(HUXERUI_TSX_ESBUILD_BIN "$ENV{HUXERUI_ESBUILD}")
     endif ()
+    if (NOT HUXERUI_TSX_ESBUILD_BIN AND HUXERUI_TSX_ESBUILD_PLATFORM)
+        _huxerui_tsx_vendored_esbuild(HUXERUI_TSX_ESBUILD_BIN)
+    endif ()
     if (NOT HUXERUI_TSX_ESBUILD_BIN)
         find_program(HUXERUI_TSX_ESBUILD_BIN esbuild)
     endif ()
@@ -153,9 +301,9 @@ function(huxerui_tsx_bundle output)
     endif ()
     if (NOT HUXERUI_TSX_ESBUILD_BIN)
         message(FATAL_ERROR
-                "huxerui_tsx_bundle() could not find esbuild. Set HUXERUI_TSX_ESBUILD "
-                "to an esbuild binary, put esbuild on PATH, or add a vendored binary "
-                "under third_party/esbuild/ for this host platform.")
+                "huxerui_tsx_bundle() could not find or fetch esbuild. Set HUXERUI_TSX_ESBUILD "
+                "to an esbuild binary, put esbuild on PATH, or pre-populate "
+                "third_party/esbuild/<platform>/esbuild for this host platform.")
     endif ()
     get_filename_component(HUXERUI_TSX_ESBUILD_BIN
             "${HUXERUI_TSX_ESBUILD_BIN}" ABSOLUTE

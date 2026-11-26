@@ -1,7 +1,6 @@
-# Vendored esbuild
+# On-Demand esbuild Toolchain
 
-This directory pins standalone esbuild **0.25.0** binaries so CMake can invoke the compiler
-directly without Node or npm.
+HuxerUI pins standalone esbuild **0.25.0** so CMake can bundle TSX without Node or npm while keeping the repository small.
 
 - Source: npm packages `@esbuild/<platform>@0.25.0`
 - License: MIT (see `LICENSE.md`)
@@ -39,11 +38,12 @@ esbuild executables. Use `HUXERUI_TSX_ESBUILD` for an Android-host workaround.
 
 ## Resolution
 
-`cmake/HuxerUITsx.cmake` selects `third_party/esbuild/<platform>/esbuild` (or `esbuild.exe` on
-Windows) from the build host. Override with:
+`cmake/HuxerUITsx.cmake` resolves `esbuild` when `huxerui_tsx_bundle()` is invoked in the following order:
 
-- `-DHUXERUI_TSX_ESBUILD_PLATFORM=<platform-id>`
-- `-DHUXERUI_TSX_ESBUILD=/path/to/esbuild`
+1. Explicit `ESBUILD` argument, `-DHUXERUI_TSX_ESBUILD=/path/to/esbuild`, or `ENV{HUXERUI_ESBUILD}`.
+2. System `esbuild` on `PATH` (skipped when `-DHUXERUI_TSX_ESBUILD_PLATFORM=<id>` is explicitly set).
+3. Local pre-populated binary at `third_party/esbuild/<platform>/esbuild` (or `.exe` on Windows).
+4. Cached or on-demand downloaded binary from `${HUXERUI_TSX_ESBUILD_BASE_URL}/@esbuild/<platform>/-/<platform>-0.25.0.tgz`, verified against `SHA256SUMS` and cached under `HUXERUI_TSX_ESBUILD_CACHE_DIR` (or `ENV{HUXERUI_ESBUILD_CACHE_DIR}`, defaulting to `${CMAKE_BINARY_DIR}/.huxerui-esbuild`).
 
 The binary is a build tool only. It is not linked into `libhuxerui_tsx`, and it never runs inside
 QuickJS.
