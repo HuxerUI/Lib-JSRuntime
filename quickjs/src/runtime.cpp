@@ -13,19 +13,22 @@ namespace {
 int InterruptTrampoline(JSContext* context, void* opaque) {
   static_cast<void>(context);
   auto* state = static_cast<RuntimeState*>(opaque);
-  if (!state) {
+  if (!state || state->capturing_error) {
     return 0;
   }
   if (state->options.should_interrupt) {
     try {
       if (state->options.should_interrupt()) {
+        state->interrupted = true;
         return 1;
       }
     } catch (...) {
+      state->interrupted = true;
       return 1;
     }
   }
   if (state->deadline_active && std::chrono::steady_clock::now() >= state->deadline) {
+    state->interrupted = true;
     return 1;
   }
   return 0;

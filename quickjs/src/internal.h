@@ -20,6 +20,8 @@ struct RuntimeState final {
   RuntimeOptions options;
   bool deadline_active = false;
   std::chrono::steady_clock::time_point deadline{};
+  bool interrupted = false;
+  bool capturing_error = false;
 };
 
 struct ContextState final {

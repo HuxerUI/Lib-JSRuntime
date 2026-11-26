@@ -404,6 +404,12 @@ Result<Value> Value::Call(Value this_value, std::span<const Value> arguments) co
     raw_arguments.push_back(detail::ValueAccess::Raw(argument));
   }
 
+  auto* runtime_state =
+      static_cast<detail::RuntimeState*>(JS_GetRuntimeOpaque(JS_GetRuntime(context)));
+  if (runtime_state) {
+    runtime_state->interrupted = false;
+  }
+
   JSValue result = JS_Call(
       context,
       detail::ValueAccess::Raw(*this),

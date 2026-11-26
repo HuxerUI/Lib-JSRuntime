@@ -902,7 +902,7 @@ void VirtualGridElement() {
         "VirtualGrid should materialize the first tile");
 }
 
-void WriteNavigationIcon() {
+std::string WriteNavigationIcon() {
   static const unsigned char kPng[] = {
       0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
       0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -913,20 +913,25 @@ void WriteNavigationIcon() {
       0x01, 0x01, 0x27, 0x18, 0xE3, 0x66, 0x00, 0x00,
       0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
   };
-  std::ofstream output("/tmp/huxerui-tsx-navigation-icon.png", std::ios::binary);
+  const auto icon_path =
+      std::filesystem::temp_directory_path() / "huxerui-tsx-navigation-icon.png";
+  std::ofstream output(icon_path, std::ios::binary);
   output.write(reinterpret_cast<const char*>(kPng), sizeof(kPng));
+  output.flush();
+  Check(output.good(), "navigation icon fixture should be written");
+  return icon_path.generic_string();
 }
 
 void NavigationBarElement() {
-  WriteNavigationIcon();
-  const char* bundle = R"JS(
+  const std::string icon_path = WriteNavigationIcon();
+  const std::string bundle = std::string(R"JS(
     import {
       mount, h, Column, NavigationBar, Text, useState,
     } from "@huxerui/tsx";
 
     const items = [
-      { label: "Home", src: "/tmp/huxerui-tsx-navigation-icon.png" },
-      { label: "Settings", src: "/tmp/huxerui-tsx-navigation-icon.png" },
+      { label: "Home", src: ")JS") + icon_path + R"JS(" },
+      { label: "Settings", src: ")JS" + icon_path + R"JS(" },
     ];
 
     function App() {

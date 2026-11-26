@@ -11,6 +11,26 @@ namespace detail {
 
 namespace {
 
+class CaptureGuard final {
+public:
+  explicit CaptureGuard(RuntimeState* state) noexcept : state_(state) {
+    if (state_) {
+      previous_ = std::exchange(state_->capturing_error, true);
+    }
+  }
+  CaptureGuard(const CaptureGuard&) = delete;
+  CaptureGuard& operator=(const CaptureGuard&) = delete;
+  ~CaptureGuard() {
+    if (state_) {
+      state_->capturing_error = previous_;
+    }
+  }
+
+private:
+  RuntimeState* state_ = nullptr;
+  bool previous_ = false;
+};
+
 std::optional<std::string> ReadStringProperty(
     JSContext* context,
     JSValueConst object,
@@ -153,6 +173,10 @@ std::optional<std::string> ToUtf8(JSContext* context, JSValueConst value) {
 }
 
 Error ErrorFromValue(JSContext* context, JSValueConst value, std::string filename) {
+  auto* runtime_state = static_cast<RuntimeState*>(JS_GetRuntimeOpaque(JS_GetRuntime(context)));
+  const CaptureGuard capture_guard(runtime_state);
+  const bool uncatchable = JS_IsUncatchableError(value);
+
   std::string name;
   std::string message;
   std::string stack;
@@ -189,8 +213,13 @@ Error ErrorFromValue(JSContext* context, JSValueConst value, std::string filenam
     ParseStackLocation(stack, filename, source_line, source_column);
   }
 
+  ErrorCode code = MapErrorCode(name, message);
+  if (uncatchable && code == ErrorCode::Exception) {
+    code = ErrorCode::Interrupted;
+  }
+
   return Error{
-      MapErrorCode(name, message),
+      code,
       std::move(message),
       std::move(filename),
       source_line,
@@ -200,9 +229,23 @@ Error ErrorFromValue(JSContext* context, JSValueConst value, std::string filenam
 }
 
 Error CaptureException(JSContext* context, std::string filename) {
+  auto* runtime_state = static_cast<RuntimeState*>(JS_GetRuntimeOpaque(JS_GetRuntime(context)));
+  const bool was_interrupted =
+      runtime_state && std::exchange(runtime_state->interrupted, false);
+  const CaptureGuard capture_guard(runtime_state);
   JSValue exception = JS_GetException(context);
   Error error = ErrorFromValue(context, exception, std::move(filename));
   JS_FreeValue(context, exception);
+  if (was_interrupted && error.Code() == ErrorCode::Exception) {
+    return Error{
+        ErrorCode::Interrupted,
+        error.Message(),
+        error.Filename(),
+        error.Line(),
+        error.Column(),
+        error.Stack(),
+    };
+  }
   return error;
 }
 
