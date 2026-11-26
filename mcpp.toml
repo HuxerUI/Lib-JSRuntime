@@ -1,7 +1,7 @@
 [package]
 namespace   = "huxerui"
 name        = "jsruntime"
-version     = "0.1.0"
+version     = "0.1.1"
 standard    = "c++23"
 description = "TSX and QuickJS JavaScript runtime bridge for HuxerUI"
 license     = "MIT"
