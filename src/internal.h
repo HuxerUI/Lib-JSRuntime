@@ -395,8 +395,17 @@ private:
   std::uint64_t next_paint_context_id_ = 1;
   std::uint64_t next_timer_id_ = 1;
   std::unordered_map<std::uint64_t, std::shared_ptr<TimerRecord>> timers_;
+  struct BoundMenuHandle {
+    huxerui::MenuHandle handle;
+    huxerui::ViewHandle anchor;
+  };
+  struct BoundPopupHandle {
+    huxerui::PopupHandle handle;
+    huxerui::ViewHandle anchor;
+  };
+
   std::uint64_t next_focus_requester_id_ = 1;
-  std::unordered_map<std::uint64_t, huxerui::FocusRequester> focus_requesters_;
+  std::unordered_map<std::uint64_t, huxerui::ViewHandle> focus_requesters_;
   std::uint64_t next_scroll_controller_id_ = 1;
   std::unordered_map<std::uint64_t, huxerui::ScrollController> scroll_controllers_;
   std::uint64_t next_toast_handle_id_ = 1;
@@ -404,13 +413,13 @@ private:
   std::uint64_t next_dialog_handle_id_ = 1;
   std::unordered_map<std::uint64_t, huxerui::DialogHandle> dialog_handles_;
   std::uint64_t next_menu_handle_id_ = 1;
-  std::unordered_map<std::uint64_t, huxerui::MenuHandle> menu_handles_;
+  std::unordered_map<std::uint64_t, BoundMenuHandle> menu_handles_;
   std::uint64_t next_snack_bar_handle_id_ = 1;
   std::unordered_map<std::uint64_t, huxerui::SnackBarHandle> snack_bar_handles_;
   std::uint64_t next_bottom_sheet_handle_id_ = 1;
   std::unordered_map<std::uint64_t, huxerui::BottomSheetHandle> bottom_sheet_handles_;
   std::uint64_t next_popup_handle_id_ = 1;
-  std::unordered_map<std::uint64_t, huxerui::PopupHandle> popup_handles_;
+  std::unordered_map<std::uint64_t, BoundPopupHandle> popup_handles_;
 };
 
 } // namespace huxerui::tsx::detail

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/file.h>
 #include <huxerui/resource.h>
 #include <huxerui/theme.h>
 #include <huxerui/text.h>
@@ -321,7 +322,7 @@ std::optional<ImageVariant> ImageFromValue(const quickjs::Value& source) {
       return std::nullopt;
     }
     try {
-      return ImageAsset::FromFile(path.Value());
+      return ImageAsset::FromFile(File(path.Value()));
     } catch (...) {
       return std::nullopt;
     }
@@ -331,7 +332,7 @@ std::optional<ImageVariant> ImageFromValue(const quickjs::Value& source) {
   }
   if (const auto file = StringProperty(source, "file")) {
     try {
-      return ImageAsset::FromFile(*file);
+      return ImageAsset::FromFile(File(*file));
     } catch (...) {
       return std::nullopt;
     }

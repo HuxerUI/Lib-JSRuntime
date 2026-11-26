@@ -295,6 +295,7 @@ Result<Value> Context::Evaluate(
     return Result<Value>::Failure(detail::ClosedError());
   }
   state_->loader_error.reset();
+  state_->runtime_state->interrupted = false;
   detail::DeadlineGuard deadline(*state_->runtime_state, options.time_limit);
 
   const std::string text(source);
@@ -332,6 +333,7 @@ Result<Value> Context::EvaluateModule(
     return Result<Value>::Failure(detail::ClosedError());
   }
   state_->loader_error.reset();
+  state_->runtime_state->interrupted = false;
   detail::DeadlineGuard deadline(*state_->runtime_state, options.time_limit);
 
   const std::string text(source);
@@ -372,6 +374,7 @@ Result<int> Context::RunJobs(int max_jobs) {
   if (!state_) {
     return Result<int>::Failure(detail::ClosedError());
   }
+  state_->runtime_state->interrupted = false;
 
   int executed = 0;
   while (max_jobs < 0 || executed < max_jobs) {

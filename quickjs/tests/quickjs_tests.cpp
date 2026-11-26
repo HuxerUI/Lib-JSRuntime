@@ -290,6 +290,14 @@ void Limits() {
     quickjs::Context context(runtime);
     auto result = context.Evaluate("1 + 1", "<interrupt>");
     CHECK(!result.Succeeded());
+    if (result.Error().Code() != quickjs::ErrorCode::Interrupted) {
+      std::fprintf(
+          stderr,
+          "expected Interrupted for should_interrupt, got code=%d message=%s\n",
+          static_cast<int>(result.Error().Code()),
+          result.Error().Message().c_str()
+      );
+    }
     CHECK(result.Error().Code() == quickjs::ErrorCode::Interrupted);
   }
   {
@@ -299,6 +307,14 @@ void Limits() {
     options.time_limit = std::chrono::milliseconds(50);
     auto result = context.Evaluate("while (true) {}", "<loop>", options);
     CHECK(!result.Succeeded());
+    if (result.Error().Code() != quickjs::ErrorCode::Interrupted) {
+      std::fprintf(
+          stderr,
+          "expected Interrupted for time_limit, got code=%d message=%s\n",
+          static_cast<int>(result.Error().Code()),
+          result.Error().Message().c_str()
+      );
+    }
     CHECK(result.Error().Code() == quickjs::ErrorCode::Interrupted);
   }
   {

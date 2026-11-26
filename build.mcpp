@@ -1,0 +1,84 @@
+import std;
+import mcpp;
+import huxerui.rules;
+
+namespace {
+
+std::string read_file(const std::filesystem::path& path, bool& ok) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        ok = false;
+        return {};
+    }
+    ok = true;
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+bool write_if_changed(const std::filesystem::path& path, const std::string& content) {
+    bool ok = false;
+    if (std::filesystem::exists(path) && read_file(path, ok) == content && ok) {
+        return true;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        std::cerr << "Lib-JSRuntime build.mcpp: cannot create directory "
+                  << path.parent_path().string() << ": " << ec.message() << "\n";
+        return false;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        std::cerr << "Lib-JSRuntime build.mcpp: cannot write " << path.string() << "\n";
+        return false;
+    }
+    out << content;
+    if (!out.good()) {
+        std::cerr << "Lib-JSRuntime build.mcpp: write failed for " << path.string() << "\n";
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+int main() {
+    const std::filesystem::path manifest_dir = mcpp::manifest_dir();
+    const std::filesystem::path out_dir = mcpp::out_dir();
+    const std::filesystem::path runtime_js = manifest_dir / "js" / "runtime.js";
+
+    bool read_ok = false;
+    const std::string js_source = read_file(runtime_js, read_ok);
+    if (!read_ok) {
+        std::cerr << "Lib-JSRuntime build.mcpp: missing or unreadable " << runtime_js.string() << "\n";
+        return 1;
+    }
+    if (js_source.find(")HUXERUIJS\"") != std::string::npos) {
+        std::cerr << "Lib-JSRuntime build.mcpp: js/runtime.js contains raw string delimiter )HUXERUIJS\"\n";
+        return 1;
+    }
+
+    const std::filesystem::path gen_dir = out_dir / "generated";
+    const std::filesystem::path embedded_header = gen_dir / "embedded_js.h";
+    const std::string header_content =
+        "// Generated from js/runtime.js. Do not edit.\n"
+        "#pragma once\n"
+        "\n"
+        "#include <string_view>\n"
+        "\n"
+        "namespace huxerui::tsx::detail {\n"
+        "\n"
+        "inline constexpr std::string_view kTsxRuntimeModule = R\"HUXERUIJS(\n" +
+        js_source +
+        "\n)HUXERUIJS\";\n"
+        "\n"
+        "} // namespace huxerui::tsx::detail\n";
+
+    if (!write_if_changed(embedded_header, header_content)) {
+        return 1;
+    }
+
+    mcpp::rerun_if_changed(runtime_js.string().c_str());
+    mcpp::include_dir(gen_dir.string().c_str());
+
+    return huxerui::rules::configure({}) ? 0 : 1;
+}
